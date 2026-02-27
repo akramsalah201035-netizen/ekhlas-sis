@@ -11,7 +11,6 @@ function cn(...x: Array<string | false | undefined | null>) {
 }
 
 function titleFromPath(pathname: string) {
-  // عنوان بسيط من المسار
   if (pathname === "/hr") return "لوحة HR";
   if (pathname.startsWith("/hr/student-actions")) return "إجراءات الطلاب";
   if (pathname.startsWith("/hr/student-reports")) return "تقارير الطلاب";
@@ -39,6 +38,21 @@ function titleFromPath(pathname: string) {
   return "إدارة مدارس الإخلاص";
 }
 
+function Avatar({ name }: { name: string }) {
+  const initials = (name || "—")
+    .split(" ")
+    .slice(0, 2)
+    .map((x) => x[0])
+    .join("")
+    .toUpperCase();
+
+  return (
+    <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-indigo-600 to-sky-500 text-white grid place-items-center font-bold">
+      {initials || "—"}
+    </div>
+  );
+}
+
 function SidebarContent({
   sections,
   pathname,
@@ -51,18 +65,22 @@ function SidebarContent({
   return (
     <div className="h-full flex flex-col">
       {/* Brand */}
-      <div className="px-3 pt-3 pb-2">
-        <div className="rounded-3xl bg-slate-900 text-white p-4">
-          <div className="text-lg font-black leading-none">مدارس الإخلاص</div>
-          <div className="text-xs text-white/70 mt-1">School Management System</div>
+      <div className="px-3 pt-3">
+        <div className="rounded-3xl bg-white/10 border border-white/15 p-4 backdrop-blur">
+          <div className="text-lg font-black leading-none text-white">
+            مدارس الإخلاص
+          </div>
+          <div className="text-xs text-white/70 mt-1">
+            School Management System
+          </div>
         </div>
       </div>
 
       {/* Nav */}
-      <div className="px-2 pb-3 overflow-auto">
+      <div className="px-2 pb-3 overflow-auto mt-3">
         {sections.map((sec) => (
           <div key={sec.label} className="mt-4">
-            <div className="px-3 text-xs font-semibold text-slate-500">
+            <div className="px-3 text-xs font-semibold text-white/70">
               {sec.label}
             </div>
 
@@ -79,15 +97,17 @@ function SidebarContent({
                     className={cn(
                       "group flex items-center justify-between rounded-2xl px-3 py-2 text-sm transition",
                       active
-                        ? "bg-slate-900 text-white shadow-sm"
-                        : "text-slate-700 hover:bg-slate-100"
+                        ? "bg-white/15 border border-white/20 text-white shadow-sm"
+                        : "text-white/85 hover:bg-white/10 hover:text-white"
                     )}
                   >
                     <span className="font-medium">{it.title}</span>
                     <span
                       className={cn(
                         "h-2 w-2 rounded-full transition",
-                        active ? "bg-emerald-400" : "bg-transparent group-hover:bg-slate-300"
+                        active
+                          ? "bg-emerald-300"
+                          : "bg-white/20 group-hover:bg-white/40"
                       )}
                     />
                   </Link>
@@ -98,8 +118,7 @@ function SidebarContent({
         ))}
       </div>
 
-      {/* Footer area placeholder */}
-      <div className="mt-auto px-3 pb-3 text-xs text-slate-400">
+      <div className="mt-auto px-4 pb-4 text-xs text-white/60">
         © {new Date().getFullYear()} Ekhlas SIS
       </div>
     </div>
@@ -151,10 +170,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Top Navbar */}
-      <header className="sticky top-0 z-40 border-b bg-white/80 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b bg-white/85 backdrop-blur">
         <div className="mx-auto max-w-7xl px-4 h-16 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            {/* Mobile menu button */}
             <button
               className="lg:hidden rounded-2xl border px-3 py-2 text-sm hover:bg-slate-50"
               onClick={() => setMobileOpen(true)}
@@ -164,23 +182,27 @@ export function AppShell({ children }: { children: ReactNode }) {
             </button>
 
             <div>
-              <div className="text-sm text-slate-500">Dashboard</div>
-              <div className="text-lg font-bold leading-tight">
+              <div className="text-xs text-slate-500">Dashboard</div>
+              <div className="text-lg font-extrabold leading-tight text-slate-900">
                 {titleFromPath(pathname)}
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* quick actions */}
-            <div className="hidden md:block text-right">
-              <div className="text-xs text-slate-500">مرحبًا</div>
-              <div className="text-sm font-semibold">{loading ? "..." : userName}</div>
+          <div className="flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-3">
+              <div className="text-right">
+                <div className="text-xs text-slate-500">مرحبًا</div>
+                <div className="text-sm font-semibold text-slate-900">
+                  {loading ? "..." : userName}
+                </div>
+              </div>
+              <Avatar name={loading ? "—" : userName} />
             </div>
 
             <button
               onClick={logout}
-              className="rounded-2xl bg-slate-900 text-white px-4 py-2 text-sm font-medium hover:bg-slate-800"
+              className="rounded-2xl bg-gradient-to-r from-indigo-600 to-sky-500 text-white px-4 py-2 text-sm font-semibold shadow-sm hover:opacity-95"
             >
               تسجيل خروج
             </button>
@@ -189,11 +211,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       {/* Layout */}
-      <div className="mx-auto max-w-7xl px-4 py-4 grid gap-4 lg:grid-cols-[300px_1fr]">
+      <div className="mx-auto max-w-7xl px-4 py-4 grid gap-4 lg:grid-cols-[320px_1fr]">
         {/* Desktop Sidebar */}
         <aside className="hidden lg:block">
-          <div className="rounded-3xl border bg-white shadow-sm h-[calc(100vh-96px)] overflow-hidden">
-            <SidebarContent sections={sections} pathname={pathname} />
+          <div className="rounded-3xl overflow-hidden shadow-sm border">
+            <div className="h-[calc(100vh-96px)] bg-gradient-to-b from-indigo-700 via-indigo-700 to-sky-600">
+              <SidebarContent sections={sections} pathname={pathname} />
+            </div>
           </div>
         </aside>
 
@@ -204,21 +228,24 @@ export function AppShell({ children }: { children: ReactNode }) {
               className="absolute inset-0 bg-black/40"
               onClick={() => setMobileOpen(false)}
             />
-            <div className="absolute right-0 top-0 h-full w-[86%] max-w-sm bg-white shadow-2xl">
-              <div className="h-16 border-b px-4 flex items-center justify-between">
-                <div className="font-bold">القائمة</div>
-                <button
-                  className="rounded-2xl border px-3 py-2 text-sm"
-                  onClick={() => setMobileOpen(false)}
-                >
-                  ✕
-                </button>
+            <div className="absolute right-0 top-0 h-full w-[88%] max-w-sm overflow-hidden rounded-l-3xl shadow-2xl border">
+              <div className="h-full bg-gradient-to-b from-indigo-700 via-indigo-700 to-sky-600">
+                <div className="h-16 border-b border-white/15 px-4 flex items-center justify-between text-white">
+                  <div className="font-bold">القائمة</div>
+                  <button
+                    className="rounded-2xl bg-white/10 border border-white/20 px-3 py-2 text-sm"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <SidebarContent
+                  sections={sections}
+                  pathname={pathname}
+                  onNavigate={() => setMobileOpen(false)}
+                />
               </div>
-              <SidebarContent
-                sections={sections}
-                pathname={pathname}
-                onNavigate={() => setMobileOpen(false)}
-              />
             </div>
           </div>
         ) : null}
