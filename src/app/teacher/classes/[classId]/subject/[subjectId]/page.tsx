@@ -11,7 +11,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 
 type ProfileMini = { id: string; full_name: string; phone: string | null };
@@ -19,6 +24,10 @@ type StudentRow = { student_id: string; class_id: string; student_code: string |
 
 type Term = { id: string; name: string; is_active: boolean };
 type Assessment = { id: string; title: string; type: string; max_score: number; date: string | null };
+
+function cn(...x: Array<string | false | undefined | null>) {
+  return x.filter(Boolean).join(" ");
+}
 
 export default function TeacherClassSubjectPage() {
   const supabase = useMemo(() => supabaseBrowser(), []);
@@ -32,7 +41,6 @@ export default function TeacherClassSubjectPage() {
   const [profiles, setProfiles] = useState<ProfileMini[]>([]);
   const [className, setClassName] = useState<string>("—");
   const [subjectName, setSubjectName] = useState<string>("—");
-
   const [activeTerm, setActiveTerm] = useState<Term | null>(null);
 
   // assessments + scores
@@ -40,7 +48,7 @@ export default function TeacherClassSubjectPage() {
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string>("");
 
   // scores draft map
-  const [scores, setScores] = useState<Record<string, string>>({}); // student_id => score string
+  const [scores, setScores] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
   // create assessment modal
@@ -87,6 +95,7 @@ export default function TeacherClassSubjectPage() {
 
   async function loadAssessments() {
     if (!activeTerm?.id) return;
+
     const a = await supabase
       .from("assessments")
       .select("id,title,type,max_score,date")
@@ -102,7 +111,10 @@ export default function TeacherClassSubjectPage() {
   }
 
   async function loadScores(assessmentId: string) {
-    if (!assessmentId) { setScores({}); return; }
+    if (!assessmentId) {
+      setScores({});
+      return;
+    }
 
     const sc = await supabase
       .from("student_scores")
@@ -143,23 +155,35 @@ export default function TeacherClassSubjectPage() {
 
     const { data: auth } = await supabase.auth.getUser();
     const teacherId = auth.user?.id;
-    if (!teacherId) { setCreating(false); return alert("Unauthorized"); }
+    if (!teacherId) {
+      setCreating(false);
+      return alert("Unauthorized");
+    }
 
     const prof = await supabase.from("profiles").select("school_id").eq("id", teacherId).single();
     const school_id = prof.data?.school_id as string | null;
-    if (!school_id) { setCreating(false); return alert("No school_id"); }
+    if (!school_id) {
+      setCreating(false);
+      return alert("No school_id");
+    }
 
-    const ins = await supabase.from("assessments").insert([{
-      school_id,
-      term_id: activeTerm.id,
-      class_id: classId,
-      subject_id: subjectId,
-      teacher_id: teacherId,
-      title: aForm.title.trim(),
-      type: aForm.type,
-      max_score: Number(aForm.max_score) || 100,
-      date: aForm.date || null,
-    }]).select("id").single();
+    const ins = await supabase
+      .from("assessments")
+      .insert([
+        {
+          school_id,
+          term_id: activeTerm.id,
+          class_id: classId,
+          subject_id: subjectId,
+          teacher_id: teacherId,
+          title: aForm.title.trim(),
+          type: aForm.type,
+          max_score: Number(aForm.max_score) || 100,
+          date: aForm.date || null,
+        },
+      ])
+      .select("id")
+      .single();
 
     setCreating(false);
 
@@ -176,7 +200,6 @@ export default function TeacherClassSubjectPage() {
     if (!selectedAssessmentId) return alert("اختر اختبار");
     setSaving(true);
 
-    // upsert لكل الطلاب (حتى الفارغ هنخليه null)
     const payload = students.map((st) => {
       const raw = (scores[st.student_id] ?? "").trim();
       const val = raw === "" ? null : Number(raw);
@@ -198,26 +221,65 @@ export default function TeacherClassSubjectPage() {
   }
 
   const selectedAssessment = assessments.find((a) => a.id === selectedAssessmentId) ?? null;
+  const maxScore = selectedAssessment?.max_score ?? null;
+
+  const invalidCount =
+    maxScore == null
+      ? 0
+      : students.reduce((acc, st) => {
+          const raw = (scores[st.student_id] ?? "").trim();
+          if (!raw) return acc;
+          const v = Number(raw);
+          if (!Number.isFinite(v)) return acc + 1;
+          if (v > maxScore) return acc + 1;
+          if (v < 0) return acc + 1;
+          return acc;
+        }, 0);
 
   return (
     <AppShell>
-      <PageHeader
-        title={`${className} — ${subjectName}`}
-        subtitle="الطلاب + الاختبارات والدرجات"
-      />
+      <div className="mb-6 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <PageHeader
+          title={`${className} — ${subjectName}`}
+          subtitle="إدارة الاختبارات والدرجات + أدوات الحضور والسلوك والملاحظات"
+        />
 
-      {/* Assessments bar */}
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" className="rounded-2xl">
+            <Link href="/teacher/classes">رجوع لفصولي</Link>
+          </Button>
+
+          <Button asChild variant="outline" className="rounded-2xl">
+            <Link href={`/teacher/classes/${classId}/subject/${subjectId}/attendance`}>الحضور</Link>
+          </Button>
+
+          <Button asChild variant="outline" className="rounded-2xl">
+            <Link href={`/teacher/classes/${classId}/subject/${subjectId}/behavior`}>السلوك</Link>
+          </Button>
+
+          <Button asChild variant="outline" className="rounded-2xl">
+            <Link href={`/teacher/classes/${classId}/subject/${subjectId}/notes`}>الملاحظات</Link>
+          </Button>
+
+          <Button className="rounded-2xl" onClick={() => setOpen(true)}>
+            إنشاء اختبار
+          </Button>
+        </div>
+      </div>
+
+      {/* Assessment selector + meta */}
       <Card className="rounded-2xl mb-6">
         <CardContent className="p-6 grid gap-3 md:grid-cols-3">
-          <div className="space-y-1">
-            <div className="text-sm font-medium">الترم النشط</div>
-            <div className="text-sm text-slate-600">
-              {activeTerm ? activeTerm.name : "—"}
+          <div className="rounded-2xl border bg-white p-4">
+            <div className="text-xs text-slate-500">الترم النشط</div>
+            <div className="font-bold mt-1">{activeTerm ? activeTerm.name : "—"}</div>
+            <div className="text-xs text-slate-500 mt-1">
+              الطلاب: <span dir="ltr">{students.length}</span>
             </div>
           </div>
 
-          <div className="space-y-1 md:col-span-1">
-            <label className="text-sm font-medium">اختبار</label>
+          <div className="space-y-1">
+            <label className="text-sm font-medium">اختيار اختبار</label>
             <select
               className="h-10 w-full rounded-xl border px-3 text-sm bg-white"
               value={selectedAssessmentId}
@@ -234,49 +296,84 @@ export default function TeacherClassSubjectPage() {
                 ))
               )}
             </select>
+
+            {selectedAssessment ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Badge variant="secondary">Max: {selectedAssessment.max_score}</Badge>
+                {selectedAssessment.date ? (
+                  <Badge variant="secondary">{selectedAssessment.date}</Badge>
+                ) : null}
+                <Badge variant="secondary">Type: {selectedAssessment.type}</Badge>
+              </div>
+            ) : (
+              <div className="mt-2 text-xs text-slate-500">
+                أنشئ اختبارًا جديدًا ليظهر هنا.
+              </div>
+            )}
           </div>
 
-          <div className="flex items-end justify-end gap-2">
-            <Button variant="outline" className="rounded-2xl" onClick={loadBase}>
-              تحديث
-            </Button>
-            <Button asChild variant="outline" className="rounded-2xl">
-              <Link href={`/teacher/classes/${classId}/subject/${subjectId}/attendance`}>الحضور</Link>
-            </Button>
+          <div className="flex flex-col justify-between gap-2">
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="outline" className="rounded-2xl" onClick={loadBase}>
+                تحديث
+              </Button>
 
-            <Button asChild variant="outline" className="rounded-2xl">
-              <Link href={`/teacher/classes/${classId}/subject/${subjectId}/behavior`}>السلوك</Link>
-            </Button>
-
-            <Button asChild variant="outline" className="rounded-2xl">
-              <Link href={`/teacher/classes/${classId}/subject/${subjectId}/notes`}>الملاحظات</Link>
-            </Button>
-            <Button className="rounded-2xl" onClick={() => setOpen(true)}>
-              إنشاء اختبار
-            </Button>
-          </div>
-
-          {selectedAssessment ? (
-            <div className="md:col-span-3 text-sm text-slate-600 flex flex-wrap gap-2">
-              <Badge variant="secondary">max: {selectedAssessment.max_score}</Badge>
-              {selectedAssessment.date ? <Badge variant="secondary">{selectedAssessment.date}</Badge> : null}
+              <Button
+                className="rounded-2xl"
+                onClick={saveScores}
+                disabled={!selectedAssessmentId || saving}
+              >
+                {saving ? "جاري الحفظ..." : "حفظ الدرجات"}
+              </Button>
             </div>
-          ) : null}
+
+            {selectedAssessmentId ? (
+              <div className="text-xs text-slate-500 text-right">
+                {invalidCount > 0 ? (
+                  <span className="text-rose-600">
+                    تنبيه: يوجد {invalidCount} درجات غير صالحة (أكبر من Max أو أقل من 0)
+                  </span>
+                ) : (
+                  <span>ادخل الدرجات ثم اضغط حفظ</span>
+                )}
+              </div>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
 
-      {/* Students + scores */}
+      {/* Students table */}
       <Card className="rounded-2xl">
         <CardContent className="p-0">
-          <div className="rounded-2xl border bg-white overflow-hidden">
+          <div className="p-4 border-b flex items-center justify-between">
+            <div>
+              <div className="text-lg font-bold">درجات الطلاب</div>
+              <div className="text-sm text-slate-600">
+                {selectedAssessment ? (
+                  <>
+                    الاختبار: <b>{selectedAssessment.title}</b>{" "}
+                    <span className="text-slate-400">•</span>{" "}
+                    النهائي: <span dir="ltr">{selectedAssessment.max_score}</span>
+                  </>
+                ) : (
+                  "اختر اختبارًا لبدء إدخال الدرجات"
+                )}
+              </div>
+            </div>
+            <Badge variant="secondary">
+              عدد الطلاب: <span dir="ltr">{students.length}</span>
+            </Badge>
+          </div>
+
+          <div className="rounded-2xl border-t bg-white overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>#</TableHead>
+                  <TableHead className="w-[60px]">#</TableHead>
                   <TableHead>اسم الطالب</TableHead>
-                  <TableHead>الكود</TableHead>
-                  <TableHead>هاتف</TableHead>
-                  <TableHead className="w-[160px]">الدرجة</TableHead>
+                  <TableHead className="w-[140px]">الكود</TableHead>
+                  <TableHead className="w-[160px]">هاتف</TableHead>
+                  <TableHead className="w-[220px]">الدرجة</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -294,31 +391,50 @@ export default function TeacherClassSubjectPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  students.map((st, idx) => (
-                    <TableRow key={st.student_id}>
-                      <TableCell>{idx + 1}</TableCell>
-                      <TableCell className="font-medium">{nameOf(st.student_id)}</TableCell>
-                      <TableCell dir="ltr">{st.student_code ?? "—"}</TableCell>
-                      <TableCell dir="ltr">{phoneOf(st.student_id)}</TableCell>
-                      <TableCell>
-                        <Input
-                          dir="ltr"
-                          placeholder="—"
-                          disabled={!selectedAssessmentId}
-                          value={scores[st.student_id] ?? ""}
-                          onChange={(e) =>
-                            setScores((prev) => ({ ...prev, [st.student_id]: e.target.value }))
-                          }
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  students.map((st, idx) => {
+                    const raw = scores[st.student_id] ?? "";
+                    const v = raw.trim() ? Number(raw) : null;
+                    const invalid =
+                      maxScore != null &&
+                      raw.trim() !== "" &&
+                      (!Number.isFinite(v as any) || (v as number) > maxScore || (v as number) < 0);
+
+                    return (
+                      <TableRow key={st.student_id} className={cn(invalid && "bg-rose-50")}>
+                        <TableCell>{idx + 1}</TableCell>
+                        <TableCell className="font-medium">{nameOf(st.student_id)}</TableCell>
+                        <TableCell dir="ltr">{st.student_code ?? "—"}</TableCell>
+                        <TableCell dir="ltr">{phoneOf(st.student_id)}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              dir="ltr"
+                              placeholder="—"
+                              disabled={!selectedAssessmentId}
+                              value={raw}
+                              onChange={(e) =>
+                                setScores((prev) => ({ ...prev, [st.student_id]: e.target.value }))
+                              }
+                            />
+                            {maxScore != null ? (
+                              <div className={cn("text-xs", invalid ? "text-rose-600" : "text-slate-500")} dir="ltr">
+                                / {maxScore}
+                              </div>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
           </div>
 
-          <div className="p-4 flex items-center justify-end gap-2">
+          <div className="p-4 flex items-center justify-between">
+            <div className="text-xs text-slate-500">
+              Tip: استخدم Tab للتنقل بين حقول الدرجات بسرعة.
+            </div>
             <Button
               className="rounded-2xl"
               onClick={saveScores}
@@ -337,15 +453,23 @@ export default function TeacherClassSubjectPage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-lg font-bold">إنشاء اختبار</div>
-                <div className="text-sm text-slate-500">سيظهر داخل هذا الفصل/المادة</div>
+                <div className="text-sm text-slate-500">
+                  {className} — {subjectName} • {activeTerm?.name ?? "—"}
+                </div>
               </div>
-              <Button variant="ghost" onClick={() => setOpen(false)}>✕</Button>
+              <Button variant="ghost" onClick={() => setOpen(false)}>
+                ✕
+              </Button>
             </div>
 
             <div className="mt-5 grid gap-3">
               <div className="space-y-1">
                 <label className="text-sm font-medium">الاسم *</label>
-                <Input value={aForm.title} onChange={(e) => setAForm({ ...aForm, title: e.target.value })} />
+                <Input
+                  value={aForm.title}
+                  onChange={(e) => setAForm({ ...aForm, title: e.target.value })}
+                  placeholder="مثال: Quiz 1"
+                />
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
@@ -364,17 +488,30 @@ export default function TeacherClassSubjectPage() {
 
                 <div className="space-y-1">
                   <label className="text-sm font-medium">الدرجة النهائية</label>
-                  <Input dir="ltr" value={String(aForm.max_score)} onChange={(e) => setAForm({ ...aForm, max_score: Number(e.target.value) || 100 })} />
+                  <Input
+                    dir="ltr"
+                    value={String(aForm.max_score)}
+                    onChange={(e) =>
+                      setAForm({ ...aForm, max_score: Number(e.target.value) || 100 })
+                    }
+                  />
                 </div>
               </div>
 
               <div className="space-y-1">
                 <label className="text-sm font-medium">التاريخ</label>
-                <Input dir="ltr" type="date" value={aForm.date} onChange={(e) => setAForm({ ...aForm, date: e.target.value })} />
+                <Input
+                  dir="ltr"
+                  type="date"
+                  value={aForm.date}
+                  onChange={(e) => setAForm({ ...aForm, date: e.target.value })}
+                />
               </div>
 
               <div className="flex justify-end gap-2 mt-2">
-                <Button variant="outline" onClick={() => setOpen(false)}>إلغاء</Button>
+                <Button variant="outline" onClick={() => setOpen(false)}>
+                  إلغاء
+                </Button>
                 <Button className="rounded-2xl" disabled={creating} onClick={createAssessment}>
                   {creating ? "جاري..." : "إنشاء"}
                 </Button>
