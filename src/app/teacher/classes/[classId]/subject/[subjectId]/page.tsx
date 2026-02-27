@@ -243,6 +243,14 @@ export default function TeacherClassSubjectPage() {
             <Button asChild variant="outline" className="rounded-2xl">
               <Link href={`/teacher/classes/${classId}/subject/${subjectId}/attendance`}>الحضور</Link>
             </Button>
+
+            <Button asChild variant="outline" className="rounded-2xl">
+              <Link href={`/teacher/classes/${classId}/subject/${subjectId}/behavior`}>السلوك</Link>
+            </Button>
+
+            <Button asChild variant="outline" className="rounded-2xl">
+              <Link href={`/teacher/classes/${classId}/subject/${subjectId}/notes`}>الملاحظات</Link>
+            </Button>
             <Button className="rounded-2xl" onClick={() => setOpen(true)}>
               إنشاء اختبار
             </Button>
