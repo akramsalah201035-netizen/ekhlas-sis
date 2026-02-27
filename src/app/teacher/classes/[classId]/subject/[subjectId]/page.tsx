@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { AppShell } from "@/components/shell/AppShell";
@@ -240,7 +241,7 @@ export default function TeacherClassSubjectPage() {
               تحديث
             </Button>
             <Button asChild variant="outline" className="rounded-2xl">
-              <Link href={`/attendance`}>الحضور</Link>
+              <Link href={`/teacher/classes/${classId}/subject/${subjectId}/attendance`}>الحضور</Link>
             </Button>
             <Button className="rounded-2xl" onClick={() => setOpen(true)}>
               إنشاء اختبار
