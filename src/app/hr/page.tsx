@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/shell/AppShell";
 import { PageHeader } from "@/components/shell/PageHeader";
-
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
 export default function HrPage() {
   return (
     <AppShell>
