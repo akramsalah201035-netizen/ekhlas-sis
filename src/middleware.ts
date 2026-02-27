@@ -16,27 +16,35 @@ function matchPrefix(pathname: string, prefix: string) {
 }
 
 export async function middleware(req: NextRequest) {
-  const res = NextResponse.next();
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => req.cookies.getAll(),
-        setAll: (cookies) => {
-          cookies.forEach((c) => res.cookies.set(c.name, c.value, c.options));
-        },
-      },
-    }
-  );
-
-  const { data: { user } } = await supabase.auth.getUser();
-
   const pathname = req.nextUrl.pathname;
 
+  // ✅ استثناء API routes بالكامل (علشان POST/PUT/DELETE ما يتكسرش)
+  if (pathname.startsWith("/api")) {
+    return NextResponse.next();
+  }
+
   // صفحات عامة
-  if (pathname === "/login" || pathname.startsWith("/auth")) return res;
+  if (pathname === "/login" || pathname.startsWith("/auth")) {
+    return NextResponse.next();
+  }
+
+  const res = NextResponse.next();
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+  const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    cookies: {
+      getAll: () => req.cookies.getAll(),
+      setAll: (cookies) => {
+        cookies.forEach((c) => res.cookies.set(c.name, c.value, c.options));
+      },
+    },
+  });
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
     const url = req.nextUrl.clone();
@@ -81,5 +89,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // ✅ استثناء api من الماتشر + استثناء ملفات next الثابتة
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
 };
