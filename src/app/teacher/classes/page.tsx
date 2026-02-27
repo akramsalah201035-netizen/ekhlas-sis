@@ -109,7 +109,7 @@ export default function TeacherClassesPage() {
                     )}
 
                     <Button asChild variant="outline" className="rounded-2xl">
-                      <Link href={`/teacher/class/${a.class_id}/subject/${a.subject_id}`}>
+                      <Link href={`/teacher/classes/${a.class_id}/subject/${a.subject_id}`}>
                         فتح
                       </Link>
                     </Button>
