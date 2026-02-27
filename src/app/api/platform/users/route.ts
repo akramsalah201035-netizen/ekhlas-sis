@@ -1,94 +1,65 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
-const roleHome: Record<string, string> = {
-  platform_admin: "/platform",
-  school_admin: "/admin",
-  hr: "/hr",
-  teacher: "/teacher",
-  hod: "/hod",
-  student: "/student",
-  parent: "/parent",
-};
+const allowedRoles = new Set([
+  "platform_admin",
+  "school_admin",
+  "hr",
+  "teacher",
+  "hod",
+  "student",
+  "parent",
+]);
 
-function matchPrefix(pathname: string, prefix: string) {
-  return pathname === prefix || pathname.startsWith(prefix + "/");
-}
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const { email, password, full_name, role, school_id, phone } = body ?? {};
 
-export async function middleware(req: NextRequest) {
-  const pathname = req.nextUrl.pathname;
+    if (!email || !password || !full_name || !role) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+    if (!allowedRoles.has(role)) {
+      return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+    }
+    if (role !== "platform_admin" && !school_id) {
+      return NextResponse.json({ error: "school_id is required" }, { status: 400 });
+    }
 
-  // ✅ استثناء API routes بالكامل (علشان POST/PUT/DELETE ما يتكسرش)
-  if (pathname.startsWith("/api")) {
-    return NextResponse.next();
-  }
+    const supabase = supabaseAdmin();
 
-  // صفحات عامة
-  if (pathname === "/login" || pathname.startsWith("/auth")) {
-    return NextResponse.next();
-  }
+    const { data: created, error: createErr } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
 
-  const res = NextResponse.next();
+    if (createErr || !created?.user) {
+      return NextResponse.json({ error: createErr?.message ?? "Failed to create user" }, { status: 400 });
+    }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const userId = created.user.id;
 
-  const supabase = createServerClient(supabaseUrl, supabaseKey, {
-    cookies: {
-      getAll: () => req.cookies.getAll(),
-      setAll: (cookies) => {
-        cookies.forEach((c) => res.cookies.set(c.name, c.value, c.options));
+    const { error: profileErr } = await supabase.from("profiles").insert([
+      {
+        id: userId,
+        school_id: role === "platform_admin" ? null : school_id,
+        role,
+        full_name,
+        phone: phone || null,
+        is_active: true,
       },
-    },
-  });
+    ]);
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    if (profileErr) {
+      await supabase.auth.admin.deleteUser(userId);
+      return NextResponse.json({ error: profileErr.message }, { status: 400 });
+    }
 
-  if (!user) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/login";
-    return NextResponse.redirect(url);
+    return NextResponse.json({
+      data: { id: userId, email, role, school_id: role === "platform_admin" ? null : school_id, full_name },
+    });
+  } catch {
+    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
-
-  // جلب role من profiles
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  const role = profile?.role as string | undefined;
-  if (!role) return res;
-
-  // Root redirect
-  if (pathname === "/") {
-    const url = req.nextUrl.clone();
-    url.pathname = roleHome[role] ?? "/login";
-    return NextResponse.redirect(url);
-  }
-
-  // حماية حسب Prefix
-  const allow =
-    (role === "platform_admin" && matchPrefix(pathname, "/platform")) ||
-    (role === "school_admin" && matchPrefix(pathname, "/admin")) ||
-    (role === "hr" && matchPrefix(pathname, "/hr")) ||
-    (role === "teacher" && matchPrefix(pathname, "/teacher")) ||
-    (role === "hod" && matchPrefix(pathname, "/hod")) ||
-    (role === "student" && matchPrefix(pathname, "/student")) ||
-    (role === "parent" && matchPrefix(pathname, "/parent"));
-
-  if (!allow) {
-    const url = req.nextUrl.clone();
-    url.pathname = roleHome[role] ?? "/login";
-    return NextResponse.redirect(url);
-  }
-
-  return res;
 }
-
-export const config = {
-  // ✅ استثناء api من الماتشر + استثناء ملفات next الثابتة
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
-};
