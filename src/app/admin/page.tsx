@@ -27,6 +27,10 @@ export default function AdminPage() {
         <Button asChild className="rounded-2xl">
           <Link href="/admin/academic">إدارة السنة </Link>
         </Button>
+
+        <Button asChild className="rounded-2xl">
+          <Link href="/admin/students">الطلاب  </Link>
+        </Button>
       </div>
 
       <div className="rounded-2xl border bg-white p-6">
