@@ -29,29 +29,9 @@ type AttendanceRow = {
   period_no: number | null;
 };
 
-type NoteRow = {
-  id: string;
-  created_at: string;
-  note: string;
-  created_by: string | null;
-};
-
-type BehaviorRow = {
-  id: string;
-  created_at: string;
-  behavior_type: string;
-  points: number | null;
-  details: string | null;
-};
-
-type ActionRow = {
-  id: string;
-  created_at: string;
-  action_type: string;
-  title: string;
-  note: string | null;
-  status: string | null;
-};
+type NoteRow = { id: string; created_at: string; note: string; created_by: string | null };
+type BehaviorRow = { id: string; created_at: string; behavior_type: string; points: number | null; details: string | null };
+type ActionRow = { id: string; created_at: string; action_type: string; title: string; note: string | null; status: string | null };
 
 function TabBtn({ active, children, onClick }: any) {
   return (
@@ -71,6 +51,7 @@ export default function StudentReportPage() {
   const supabase = useMemo(() => supabaseBrowser(), []);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("—");
+  const [errMsg, setErrMsg] = useState<string>("");
 
   const [tab, setTab] = useState<"grades" | "attendance" | "behavior" | "notes" | "actions">("grades");
 
@@ -82,75 +63,122 @@ export default function StudentReportPage() {
 
   async function load() {
     setLoading(true);
+    setErrMsg("");
 
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth.user?.id;
-    if (!uid) {
-      setLoading(false);
-      return;
-    }
+    if (!uid) { setLoading(false); return; }
 
     // اسم الطالب
     const p = await supabase.from("profiles").select("full_name").eq("id", uid).single();
     setName(p.data?.full_name ?? "—");
 
-    // 1) GRADES
+    // ---------- GRADES (بدون joins) ----------
     try {
-      const g = await supabase
+      const sc = await supabase
         .from("student_scores")
-        .select(`
-          id, score, assessment_id,
-          assessments:assessment_id ( title, max_score, date, subjects:subject_id ( name ) )
-        `)
+        .select("id,score,assessment_id")
         .eq("student_id", uid)
         .order("created_at", { ascending: false });
 
-      if (!g.error && g.data) {
-        const mapped: GradeRow[] = (g.data as any[]).map((r) => ({
+      if (sc.error) throw sc.error;
+
+      const rows = (sc.data ?? []) as any[];
+      const assessmentIds = Array.from(new Set(rows.map(r => r.assessment_id).filter(Boolean)));
+
+      let assessmentsMap: Record<string, any> = {};
+      let subjectsMap: Record<string, any> = {};
+
+      if (assessmentIds.length) {
+        const a = await supabase
+          .from("assessments")
+          .select("id,title,max_score,date,subject_id")
+          .in("id", assessmentIds);
+
+        if (a.error) throw a.error;
+
+        (a.data ?? []).forEach((x: any) => { assessmentsMap[x.id] = x; });
+
+        const subjectIds = Array.from(new Set((a.data ?? []).map((x: any) => x.subject_id).filter(Boolean)));
+        if (subjectIds.length) {
+          const s = await supabase.from("subjects").select("id,name").in("id", subjectIds);
+          if (s.error) throw s.error;
+          (s.data ?? []).forEach((x: any) => { subjectsMap[x.id] = x; });
+        }
+      }
+
+      const mapped: GradeRow[] = rows.map((r) => {
+        const a = assessmentsMap[r.assessment_id];
+        const sub = a?.subject_id ? subjectsMap[a.subject_id] : null;
+        return {
           id: r.id,
           score: r.score,
           assessment_id: r.assessment_id,
-          assessment_title: r.assessments?.title ?? null,
-          subject_name: r.assessments?.subjects?.name ?? null,
-          max_score: r.assessments?.max_score ?? null,
-          date: r.assessments?.date ?? null,
-        }));
-        setGrades(mapped);
-      } else {
-        setGrades([]);
-      }
-    } catch {
+          assessment_title: a?.title ?? null,
+          subject_name: sub?.name ?? null,
+          max_score: a?.max_score ?? null,
+          date: a?.date ?? null,
+        };
+      });
+
+      setGrades(mapped);
+    } catch (e: any) {
       setGrades([]);
+      setErrMsg((prev) => prev || `Grades error: ${e?.message ?? "unknown"}`);
     }
 
-    // 2) ATTENDANCE
+    // ---------- ATTENDANCE (بدون joins) ----------
     try {
-      const a = await supabase
+      const sa = await supabase
         .from("session_attendance")
-        .select(`
-          id, status,
-          class_sessions:session_id ( session_date, period_no, subjects:subject_id ( name ) )
-        `)
+        .select("id,status,session_id")
         .eq("student_id", uid)
         .order("created_at", { ascending: false });
 
-      if (!a.error && a.data) {
-        const mapped: AttendanceRow[] = (a.data as any[]).map((r) => ({
+      if (sa.error) throw sa.error;
+
+      const aRows = (sa.data ?? []) as any[];
+      const sessionIds = Array.from(new Set(aRows.map(r => r.session_id).filter(Boolean)));
+
+      let sessionsMap: Record<string, any> = {};
+      let subjectsMap2: Record<string, any> = {};
+
+      if (sessionIds.length) {
+        const cs = await supabase
+          .from("class_sessions")
+          .select("id,session_date,period_no,subject_id")
+          .in("id", sessionIds);
+
+        if (cs.error) throw cs.error;
+        (cs.data ?? []).forEach((x: any) => { sessionsMap[x.id] = x; });
+
+        const subjectIds = Array.from(new Set((cs.data ?? []).map((x: any) => x.subject_id).filter(Boolean)));
+        if (subjectIds.length) {
+          const s2 = await supabase.from("subjects").select("id,name").in("id", subjectIds);
+          if (s2.error) throw s2.error;
+          (s2.data ?? []).forEach((x: any) => { subjectsMap2[x.id] = x; });
+        }
+      }
+
+      const mappedAtt: AttendanceRow[] = aRows.map((r) => {
+        const sess = sessionsMap[r.session_id];
+        const sub = sess?.subject_id ? subjectsMap2[sess.subject_id] : null;
+        return {
           id: r.id,
           status: r.status,
-          session_date: r.class_sessions?.session_date ?? null,
-          period_no: r.class_sessions?.period_no ?? null,
-          subject_name: r.class_sessions?.subjects?.name ?? null,
-        }));
-        setAtt(mapped);
-      } else {
-        setAtt([]);
-      }
-    } catch {
+          session_date: sess?.session_date ?? null,
+          period_no: sess?.period_no ?? null,
+          subject_name: sub?.name ?? null,
+        };
+      });
+
+      setAtt(mappedAtt);
+    } catch (e: any) {
       setAtt([]);
+      setErrMsg((prev) => prev || `Attendance error: ${e?.message ?? "unknown"}`);
     }
 
-    // 3) BEHAVIOR
+    // ---------- BEHAVIOR ----------
     try {
       const b = await supabase
         .from("student_behavior_logs")
@@ -158,13 +186,14 @@ export default function StudentReportPage() {
         .eq("student_id", uid)
         .order("created_at", { ascending: false });
 
-      if (!b.error && b.data) setBeh(b.data as BehaviorRow[]);
-      else setBeh([]);
-    } catch {
+      if (b.error) throw b.error;
+      setBeh((b.data ?? []) as BehaviorRow[]);
+    } catch (e: any) {
       setBeh([]);
+      setErrMsg((prev) => prev || `Behavior error: ${e?.message ?? "unknown"}`);
     }
 
-    // 4) NOTES
+    // ---------- NOTES ----------
     try {
       const n = await supabase
         .from("student_notes")
@@ -172,13 +201,14 @@ export default function StudentReportPage() {
         .eq("student_id", uid)
         .order("created_at", { ascending: false });
 
-      if (!n.error && n.data) setNotes(n.data as NoteRow[]);
-      else setNotes([]);
-    } catch {
+      if (n.error) throw n.error;
+      setNotes((n.data ?? []) as NoteRow[]);
+    } catch (e: any) {
       setNotes([]);
+      setErrMsg((prev) => prev || `Notes error: ${e?.message ?? "unknown"}`);
     }
 
-    // 5) ACTIONS
+    // ---------- ACTIONS ----------
     try {
       const ac = await supabase
         .from("student_actions")
@@ -186,10 +216,11 @@ export default function StudentReportPage() {
         .eq("student_id", uid)
         .order("created_at", { ascending: false });
 
-      if (!ac.error && ac.data) setActions(ac.data as ActionRow[]);
-      else setActions([]);
-    } catch {
+      if (ac.error) throw ac.error;
+      setActions((ac.data ?? []) as ActionRow[]);
+    } catch (e: any) {
       setActions([]);
+      setErrMsg((prev) => prev || `Actions error: ${e?.message ?? "unknown"}`);
     }
 
     setLoading(false);
@@ -222,6 +253,17 @@ export default function StudentReportPage() {
         </div>
       </div>
 
+      {errMsg ? (
+        <Card className="rounded-2xl mb-4">
+          <CardContent className="p-4 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-2xl">
+            {errMsg}
+            <div className="text-xs text-rose-600 mt-1">
+              (ده غالبًا RLS Policy أو جدول مش موجود أو student_id مش مطابق)
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card className="rounded-2xl mb-4">
         <CardContent className="p-4 flex flex-wrap gap-2">
           <TabBtn active={tab === "grades"} onClick={() => setTab("grades")}>الدرجات</TabBtn>
@@ -235,19 +277,13 @@ export default function StudentReportPage() {
       <Card className="rounded-2xl">
         <CardContent className="p-0">
           <div className="p-6 border-b flex items-center justify-between">
-            <div>
-              <div className="text-lg font-bold">
-                {tab === "grades" ? "الدرجات" :
-                  tab === "attendance" ? "الحضور" :
-                  tab === "behavior" ? "السلوك" :
-                  tab === "notes" ? "الملاحظات" : "إجراءات HR"}
-              </div>
-              <div className="text-sm text-slate-600 mt-1">
-                {loading ? "جاري التحميل..." : "آخر البيانات المسجلة عليك"}
-              </div>
+            <div className="text-lg font-bold">
+              {tab === "grades" ? "الدرجات" :
+               tab === "attendance" ? "الحضور" :
+               tab === "behavior" ? "السلوك" :
+               tab === "notes" ? "الملاحظات" : "إجراءات HR"}
             </div>
-
-            <Badge variant="secondary" dir="ltr">{count}</Badge>
+            <Badge variant="secondary" dir="ltr">{loading ? "…" : count}</Badge>
           </div>
 
           <div className="rounded-2xl border-t bg-white overflow-hidden">
@@ -291,11 +327,7 @@ export default function StudentReportPage() {
 
               <TableBody>
                 {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="py-10 text-center text-slate-500">
-                      جاري التحميل...
-                    </TableCell>
-                  </TableRow>
+                  <TableRow><TableCell colSpan={4} className="py-10 text-center text-slate-500">جاري التحميل...</TableCell></TableRow>
                 ) : tab === "grades" ? (
                   grades.length === 0 ? (
                     <TableRow><TableCell colSpan={4} className="py-10 text-center text-slate-500">لا توجد درجات</TableCell></TableRow>
@@ -304,8 +336,7 @@ export default function StudentReportPage() {
                       <TableCell className="font-medium">{g.subject_name ?? "—"}</TableCell>
                       <TableCell>{g.assessment_title ?? "—"}</TableCell>
                       <TableCell dir="ltr">
-                        {g.score ?? "—"}{" "}
-                        {g.max_score != null ? <span className="text-slate-400">/ {g.max_score}</span> : null}
+                        {g.score ?? "—"} {g.max_score != null ? <span className="text-slate-400">/ {g.max_score}</span> : null}
                       </TableCell>
                       <TableCell dir="ltr">{g.date ?? "—"}</TableCell>
                     </TableRow>
@@ -328,8 +359,8 @@ export default function StudentReportPage() {
                     <TableRow key={b.id}>
                       <TableCell className="font-medium">{b.behavior_type}</TableCell>
                       <TableCell dir="ltr">{b.points ?? "—"}</TableCell>
-                      <TableCell className="text-slate-700">{b.details ?? "—"}</TableCell>
-                      <TableCell dir="ltr">{b.created_at.slice(0, 10)}</TableCell>
+                      <TableCell>{b.details ?? "—"}</TableCell>
+                      <TableCell dir="ltr">{b.created_at.slice(0,10)}</TableCell>
                     </TableRow>
                   ))
                 ) : tab === "notes" ? (
@@ -337,8 +368,8 @@ export default function StudentReportPage() {
                     <TableRow><TableCell colSpan={2} className="py-10 text-center text-slate-500">لا توجد ملاحظات</TableCell></TableRow>
                   ) : notes.map((n) => (
                     <TableRow key={n.id}>
-                      <TableCell className="text-slate-800">{n.note}</TableCell>
-                      <TableCell dir="ltr">{n.created_at.slice(0, 10)}</TableCell>
+                      <TableCell>{n.note}</TableCell>
+                      <TableCell dir="ltr">{n.created_at.slice(0,10)}</TableCell>
                     </TableRow>
                   ))
                 ) : (
@@ -349,7 +380,7 @@ export default function StudentReportPage() {
                       <TableCell className="font-medium">{a.action_type}</TableCell>
                       <TableCell>{a.title}</TableCell>
                       <TableCell>{a.status ?? "—"}</TableCell>
-                      <TableCell dir="ltr">{a.created_at.slice(0, 10)}</TableCell>
+                      <TableCell dir="ltr">{a.created_at.slice(0,10)}</TableCell>
                     </TableRow>
                   ))
                 )}
