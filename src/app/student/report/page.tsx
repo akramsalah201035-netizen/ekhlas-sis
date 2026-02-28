@@ -80,33 +80,33 @@ export default function StudentReportPage() {
   const [beh, setBeh] = useState<BehaviorRow[]>([]);
   const [actions, setActions] = useState<ActionRow[]>([]);
 
-  async function safeSelect<T>(promise: Promise<any>, setter: (x: T[]) => void) {
-    const res = await promise;
-    if (!res.error && res.data) setter(res.data as T[]);
-  }
-
   async function load() {
     setLoading(true);
 
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth.user?.id;
-    if (!uid) { setLoading(false); return; }
+    if (!uid) {
+      setLoading(false);
+      return;
+    }
 
+    // اسم الطالب
     const p = await supabase.from("profiles").select("full_name").eq("id", uid).single();
     setName(p.data?.full_name ?? "—");
 
-    // GRADES
-    await safeSelect<GradeRow>(
-      supabase
+    // 1) GRADES
+    try {
+      const g = await supabase
         .from("student_scores")
         .select(`
           id, score, assessment_id,
           assessments:assessment_id ( title, max_score, date, subjects:subject_id ( name ) )
         `)
         .eq("student_id", uid)
-        .order("created_at", { ascending: false }),
-      (rows) => {
-        const mapped = (rows as any[]).map((r) => ({
+        .order("created_at", { ascending: false });
+
+      if (!g.error && g.data) {
+        const mapped: GradeRow[] = (g.data as any[]).map((r) => ({
           id: r.id,
           score: r.score,
           assessment_id: r.assessment_id,
@@ -116,21 +116,26 @@ export default function StudentReportPage() {
           date: r.assessments?.date ?? null,
         }));
         setGrades(mapped);
+      } else {
+        setGrades([]);
       }
-    );
+    } catch {
+      setGrades([]);
+    }
 
-    // ATTENDANCE (حصص)
-    await safeSelect<AttendanceRow>(
-      supabase
+    // 2) ATTENDANCE
+    try {
+      const a = await supabase
         .from("session_attendance")
         .select(`
           id, status,
           class_sessions:session_id ( session_date, period_no, subjects:subject_id ( name ) )
         `)
         .eq("student_id", uid)
-        .order("created_at", { ascending: false }),
-      (rows) => {
-        const mapped = (rows as any[]).map((r) => ({
+        .order("created_at", { ascending: false });
+
+      if (!a.error && a.data) {
+        const mapped: AttendanceRow[] = (a.data as any[]).map((r) => ({
           id: r.id,
           status: r.status,
           session_date: r.class_sessions?.session_date ?? null,
@@ -138,44 +143,59 @@ export default function StudentReportPage() {
           subject_name: r.class_sessions?.subjects?.name ?? null,
         }));
         setAtt(mapped);
+      } else {
+        setAtt([]);
       }
-    );
+    } catch {
+      setAtt([]);
+    }
 
-    // BEHAVIOR
-    await safeSelect<BehaviorRow>(
-      supabase
+    // 3) BEHAVIOR
+    try {
+      const b = await supabase
         .from("student_behavior_logs")
         .select("id,created_at,behavior_type,points,details")
         .eq("student_id", uid)
-        .order("created_at", { ascending: false }),
-      setBeh
-    );
+        .order("created_at", { ascending: false });
 
-    // NOTES
-    await safeSelect<NoteRow>(
-      supabase
+      if (!b.error && b.data) setBeh(b.data as BehaviorRow[]);
+      else setBeh([]);
+    } catch {
+      setBeh([]);
+    }
+
+    // 4) NOTES
+    try {
+      const n = await supabase
         .from("student_notes")
         .select("id,created_at,note,created_by")
         .eq("student_id", uid)
-        .order("created_at", { ascending: false }),
-      setNotes
-    );
+        .order("created_at", { ascending: false });
 
-    // ACTIONS (HR)
-    await safeSelect<ActionRow>(
-      supabase
+      if (!n.error && n.data) setNotes(n.data as NoteRow[]);
+      else setNotes([]);
+    } catch {
+      setNotes([]);
+    }
+
+    // 5) ACTIONS
+    try {
+      const ac = await supabase
         .from("student_actions")
         .select("id,created_at,action_type,title,note,status")
         .eq("student_id", uid)
-        .order("created_at", { ascending: false }),
-      setActions
-    );
+        .order("created_at", { ascending: false });
+
+      if (!ac.error && ac.data) setActions(ac.data as ActionRow[]);
+      else setActions([]);
+    } catch {
+      setActions([]);
+    }
 
     setLoading(false);
   }
 
   useEffect(() => {
-    // hash navigation
     const h = window.location.hash.replace("#", "");
     if (h === "grades" || h === "attendance" || h === "behavior" || h === "notes" || h === "actions") {
       setTab(h as any);
@@ -183,6 +203,12 @@ export default function StudentReportPage() {
     load();
     // eslint-disable-next-line
   }, []);
+
+  const count =
+    tab === "grades" ? grades.length :
+    tab === "attendance" ? att.length :
+    tab === "behavior" ? beh.length :
+    tab === "notes" ? notes.length : actions.length;
 
   return (
     <AppShell>
@@ -206,28 +232,22 @@ export default function StudentReportPage() {
         </CardContent>
       </Card>
 
-      {/* CONTENT */}
       <Card className="rounded-2xl">
         <CardContent className="p-0">
           <div className="p-6 border-b flex items-center justify-between">
             <div>
               <div className="text-lg font-bold">
                 {tab === "grades" ? "الدرجات" :
-                 tab === "attendance" ? "الحضور" :
-                 tab === "behavior" ? "السلوك" :
-                 tab === "notes" ? "الملاحظات" : "إجراءات HR"}
+                  tab === "attendance" ? "الحضور" :
+                  tab === "behavior" ? "السلوك" :
+                  tab === "notes" ? "الملاحظات" : "إجراءات HR"}
               </div>
               <div className="text-sm text-slate-600 mt-1">
                 {loading ? "جاري التحميل..." : "آخر البيانات المسجلة عليك"}
               </div>
             </div>
 
-            <Badge variant="secondary" dir="ltr">
-              {tab === "grades" ? grades.length :
-               tab === "attendance" ? att.length :
-               tab === "behavior" ? beh.length :
-               tab === "notes" ? notes.length : actions.length}
-            </Badge>
+            <Badge variant="secondary" dir="ltr">{count}</Badge>
           </div>
 
           <div className="rounded-2xl border-t bg-white overflow-hidden">
@@ -284,7 +304,8 @@ export default function StudentReportPage() {
                       <TableCell className="font-medium">{g.subject_name ?? "—"}</TableCell>
                       <TableCell>{g.assessment_title ?? "—"}</TableCell>
                       <TableCell dir="ltr">
-                        {g.score ?? "—"} {g.max_score != null ? <span className="text-slate-400">/ {g.max_score}</span> : null}
+                        {g.score ?? "—"}{" "}
+                        {g.max_score != null ? <span className="text-slate-400">/ {g.max_score}</span> : null}
                       </TableCell>
                       <TableCell dir="ltr">{g.date ?? "—"}</TableCell>
                     </TableRow>
@@ -308,7 +329,7 @@ export default function StudentReportPage() {
                       <TableCell className="font-medium">{b.behavior_type}</TableCell>
                       <TableCell dir="ltr">{b.points ?? "—"}</TableCell>
                       <TableCell className="text-slate-700">{b.details ?? "—"}</TableCell>
-                      <TableCell dir="ltr">{b.created_at.slice(0,10)}</TableCell>
+                      <TableCell dir="ltr">{b.created_at.slice(0, 10)}</TableCell>
                     </TableRow>
                   ))
                 ) : tab === "notes" ? (
@@ -317,7 +338,7 @@ export default function StudentReportPage() {
                   ) : notes.map((n) => (
                     <TableRow key={n.id}>
                       <TableCell className="text-slate-800">{n.note}</TableCell>
-                      <TableCell dir="ltr">{n.created_at.slice(0,10)}</TableCell>
+                      <TableCell dir="ltr">{n.created_at.slice(0, 10)}</TableCell>
                     </TableRow>
                   ))
                 ) : (
@@ -328,7 +349,7 @@ export default function StudentReportPage() {
                       <TableCell className="font-medium">{a.action_type}</TableCell>
                       <TableCell>{a.title}</TableCell>
                       <TableCell>{a.status ?? "—"}</TableCell>
-                      <TableCell dir="ltr">{a.created_at.slice(0,10)}</TableCell>
+                      <TableCell dir="ltr">{a.created_at.slice(0, 10)}</TableCell>
                     </TableRow>
                   ))
                 )}
