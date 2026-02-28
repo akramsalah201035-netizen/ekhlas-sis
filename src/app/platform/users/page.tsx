@@ -32,6 +32,24 @@ const roleLabel: Record<string, string> = {
   parent: "Parent",
 };
 
+function cn(...x: Array<string | false | undefined | null>) {
+  return x.filter(Boolean).join(" ");
+}
+
+function roleBadge(role: string) {
+  const base = "text-white";
+  switch (role) {
+    case "platform_admin": return { cls: cn(base, "bg-slate-900"), text: roleLabel[role] };
+    case "school_admin": return { cls: cn(base, "bg-indigo-600"), text: roleLabel[role] };
+    case "hr": return { cls: cn(base, "bg-sky-600"), text: roleLabel[role] };
+    case "teacher": return { cls: cn(base, "bg-emerald-600"), text: roleLabel[role] };
+    case "hod": return { cls: cn(base, "bg-purple-600"), text: roleLabel[role] };
+    case "student": return { cls: cn(base, "bg-amber-500"), text: roleLabel[role] };
+    case "parent": return { cls: cn(base, "bg-rose-600"), text: roleLabel[role] };
+    default: return { cls: "bg-slate-600 text-white", text: role };
+  }
+}
+
 export default function UsersPage() {
   const supabase = useMemo(() => supabaseBrowser(), []);
   const [schools, setSchools] = useState<School[]>([]);
@@ -39,10 +57,16 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
 
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState(false);
+
+  // modal modes
+  const [openCreate, setOpenCreate] = useState(false);
+  const [openEdit, setOpenEdit] = useState(false);
+
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [form, setForm] = useState({
+    id: "", // for edit
     full_name: "",
     email: "",
     password: "",
@@ -82,10 +106,30 @@ export default function UsersPage() {
     );
   });
 
+  const schoolName = (id: string | null) =>
+    id ? (schools.find((s) => s.id === id)?.name ?? "—") : "مجموعة المدارس";
+
+  function openCreateModal() {
+    setForm({ id: "", full_name: "", email: "", password: "", phone: "", role: "school_admin", school_id: "" });
+    setOpenCreate(true);
+  }
+
+  function openEditModal(u: Profile) {
+    setForm({
+      id: u.id,
+      full_name: u.full_name ?? "",
+      email: "",          // في edit هنخليه اختياري لو عايز تغييره
+      password: "",       // optional
+      phone: u.phone ?? "",
+      role: u.role ?? "school_admin",
+      school_id: u.school_id ?? "",
+    });
+    setOpenEdit(true);
+  }
+
   async function createUser() {
     if (!form.email.trim() || !form.password || !form.full_name.trim() || !form.role) return;
 
-    // لو الدور غير platform_admin لازم school_id
     if (form.role !== "platform_admin" && !form.school_id) {
       alert("اختر المدرسة");
       return;
@@ -105,7 +149,7 @@ export default function UsersPage() {
       }),
     });
 
-    const text = await res.text(); // علشان لو الرد فاضي مايكسرش
+    const text = await res.text();
     let json: any = null;
     try { json = text ? JSON.parse(text) : null; } catch {}
 
@@ -116,28 +160,115 @@ export default function UsersPage() {
       return;
     }
 
-    setOpen(false);
-    setForm({ full_name: "", email: "", password: "", phone: "", role: "school_admin", school_id: "" });
+    setOpenCreate(false);
+    await loadAll();
+  }
+
+  async function updateUser() {
+    if (!form.id) return;
+    if (!form.full_name.trim() || !form.role) return;
+
+    if (form.role !== "platform_admin" && !form.school_id) {
+      alert("اختر المدرسة");
+      return;
+    }
+
+    setSaving(true);
+    const res = await fetch("/api/platform/users", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: form.id,
+        full_name: form.full_name.trim(),
+        phone: form.phone.trim() || null,
+        role: form.role,
+        school_id: form.role === "platform_admin" ? null : form.school_id,
+        // optional:
+        email: form.email.trim() || null,
+        password: form.password || null,
+      }),
+    });
+
+    const text = await res.text();
+    let json: any = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+
+    setSaving(false);
+
+    if (!res.ok) {
+      alert(json?.error ?? "حصل خطأ أثناء تعديل المستخدم");
+      return;
+    }
+
+    setOpenEdit(false);
+    await loadAll();
+  }
+
+  async function deleteUser(userId: string) {
+    if (!confirm("هل أنت متأكد من حذف المستخدم؟ سيتم تعطيل حسابه وحذف البروفايل/أو إزالته حسب التنفيذ.")) return;
+
+    setDeletingId(userId);
+
+    const res = await fetch("/api/platform/users", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId }),
+    });
+
+    const text = await res.text();
+    let json: any = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+
+    setDeletingId(null);
+
+    if (!res.ok) {
+      alert(json?.error ?? "حصل خطأ أثناء حذف المستخدم");
+      return;
+    }
+
     await loadAll();
   }
 
   return (
     <AppShell>
-      <PageHeader
-        title="المستخدمين"
-        subtitle="إنشاء وإدارة مستخدمي المدارس داخل المجموعة"
-        actionLabel="إضافة مستخدم"
-      />
+      <div className="mb-6 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <PageHeader
+          title="إدارة المستخدمين"
+          subtitle="إنشاء / تعديل / حذف مستخدمين على مستوى المنصة"
+        />
 
-      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="max-w-md w-full">
-          <Input placeholder="بحث بالاسم / الدور / الهاتف..." value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="flex flex-wrap gap-2">
+          <Button className="rounded-2xl" onClick={openCreateModal}>
+            إضافة مستخدم
+          </Button>
+          <Button variant="outline" className="rounded-2xl" onClick={loadAll} disabled={loading}>
+            {loading ? "..." : "تحديث"}
+          </Button>
         </div>
-
-        <Button className="rounded-2xl" onClick={() => setOpen(true)}>
-          إضافة مستخدم
-        </Button>
       </div>
+
+      <Card className="rounded-2xl mb-4">
+        <CardContent className="p-6 grid gap-3 md:grid-cols-3">
+          <div className="md:col-span-2">
+            <label className="text-sm font-medium">بحث</label>
+            <Input
+              placeholder="بحث بالاسم / الدور / الهاتف..."
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <div className="text-xs text-slate-500 mt-2">
+              النتائج: <span dir="ltr">{filtered.length}</span>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-white p-4">
+            <div className="text-xs text-slate-500">ملاحظة</div>
+            <div className="text-sm text-slate-700 mt-1">
+              التعديل لا يغير البريد/الباسورد إلا إذا كتبتهم.
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className="rounded-2xl">
         <CardContent className="p-0">
@@ -149,31 +280,58 @@ export default function UsersPage() {
                   <TableHead>الدور</TableHead>
                   <TableHead>المدرسة</TableHead>
                   <TableHead>الهاتف</TableHead>
+                  <TableHead>تاريخ الإنشاء</TableHead>
+                  <TableHead className="w-[180px]"></TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-10 text-center text-slate-500">جاري التحميل...</TableCell>
+                    <TableCell colSpan={6} className="py-10 text-center text-slate-500">
+                      جاري التحميل...
+                    </TableCell>
                   </TableRow>
                 ) : filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-10 text-center text-slate-500">لا يوجد مستخدمين</TableCell>
+                    <TableCell colSpan={6} className="py-10 text-center text-slate-500">
+                      لا يوجد مستخدمين
+                    </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((u) => (
-                    <TableRow key={u.id}>
-                      <TableCell className="font-medium">{u.full_name}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{roleLabel[u.role] ?? u.role}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        {u.school_id ? (schools.find((s) => s.id === u.school_id)?.name ?? "—") : "مجموعة المدارس"}
-                      </TableCell>
-                      <TableCell dir="ltr">{u.phone ?? "—"}</TableCell>
-                    </TableRow>
-                  ))
+                  filtered.map((u) => {
+                    const rb = roleBadge(u.role);
+                    return (
+                      <TableRow key={u.id}>
+                        <TableCell className="font-medium">{u.full_name}</TableCell>
+                        <TableCell>
+                          <Badge className={rb.cls}>{rb.text}</Badge>
+                        </TableCell>
+                        <TableCell>{schoolName(u.school_id)}</TableCell>
+                        <TableCell dir="ltr">{u.phone ?? "—"}</TableCell>
+                        <TableCell dir="ltr">{u.created_at.slice(0, 10)}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-2 justify-end">
+                            <Button
+                              variant="outline"
+                              className="rounded-2xl"
+                              onClick={() => openEditModal(u)}
+                            >
+                              تعديل
+                            </Button>
+                            <Button
+                              variant="outline"
+                              className={cn("rounded-2xl", deletingId === u.id && "opacity-60")}
+                              onClick={() => deleteUser(u.id)}
+                              disabled={deletingId === u.id}
+                            >
+                              {deletingId === u.id ? "..." : "حذف"}
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -181,16 +339,16 @@ export default function UsersPage() {
         </CardContent>
       </Card>
 
-      {/* Modal */}
-      {open ? (
+      {/* Create Modal */}
+      {openCreate ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-          <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-xl">
+          <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-xl">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-lg font-bold">إضافة مستخدم</div>
-                <div className="text-sm text-slate-500">إنشاء حساب جديد وربطه بدور ومدرسة</div>
+                <div className="text-sm text-slate-500">إنشاء حساب جديد (Email/Password)</div>
               </div>
-              <Button variant="ghost" onClick={() => setOpen(false)}>✕</Button>
+              <Button variant="ghost" onClick={() => setOpenCreate(false)}>✕</Button>
             </div>
 
             <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -217,9 +375,9 @@ export default function UsersPage() {
               <div className="space-y-1">
                 <label className="text-sm font-medium">الدور *</label>
                 <select
-                  className="h-10 w-full rounded-xl border px-3 text-sm"
+                  className="h-10 w-full rounded-xl border px-3 text-sm bg-white"
                   value={form.role}
-                  onChange={(e) => setForm({ ...form, role: e.target.value })}
+                  onChange={(e) => setForm({ ...form, role: e.target.value, school_id: "" })}
                 >
                   <option value="platform_admin">Platform Admin</option>
                   <option value="school_admin">School Admin</option>
@@ -234,7 +392,7 @@ export default function UsersPage() {
               <div className="space-y-1 md:col-span-2">
                 <label className="text-sm font-medium">المدرسة {form.role === "platform_admin" ? "(اختياري)" : "*"}</label>
                 <select
-                  className="h-10 w-full rounded-xl border px-3 text-sm"
+                  className="h-10 w-full rounded-xl border px-3 text-sm bg-white"
                   value={form.school_id}
                   onChange={(e) => setForm({ ...form, school_id: e.target.value })}
                   disabled={form.role === "platform_admin"}
@@ -250,9 +408,93 @@ export default function UsersPage() {
             </div>
 
             <div className="mt-6 flex items-center justify-end gap-2">
-              <Button variant="outline" onClick={() => setOpen(false)}>إلغاء</Button>
+              <Button variant="outline" className="rounded-2xl" onClick={() => setOpenCreate(false)}>
+                إلغاء
+              </Button>
               <Button disabled={saving} onClick={createUser} className="rounded-2xl">
                 {saving ? "جاري الحفظ..." : "حفظ"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Edit Modal */}
+      {openEdit ? (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-lg font-bold">تعديل مستخدم</div>
+                <div className="text-sm text-slate-500">
+                  اترك البريد/كلمة المرور فارغة إذا لا تريد تغييرهم
+                </div>
+              </div>
+              <Button variant="ghost" onClick={() => setOpenEdit(false)}>✕</Button>
+            </div>
+
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-sm font-medium">الاسم *</label>
+                <Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium">البريد الإلكتروني (اختياري)</label>
+                <Input dir="ltr" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="اتركه فارغًا لو بدون تغيير" />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium">كلمة المرور (اختياري)</label>
+                <Input dir="ltr" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="اتركه فارغًا لو بدون تغيير" />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium">الهاتف</label>
+                <Input dir="ltr" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium">الدور *</label>
+                <select
+                  className="h-10 w-full rounded-xl border px-3 text-sm bg-white"
+                  value={form.role}
+                  onChange={(e) => setForm({ ...form, role: e.target.value, school_id: "" })}
+                >
+                  <option value="platform_admin">Platform Admin</option>
+                  <option value="school_admin">School Admin</option>
+                  <option value="hr">HR</option>
+                  <option value="teacher">Teacher</option>
+                  <option value="hod">HOD</option>
+                  <option value="student">Student</option>
+                  <option value="parent">Parent</option>
+                </select>
+              </div>
+
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-sm font-medium">المدرسة {form.role === "platform_admin" ? "(اختياري)" : "*"}</label>
+                <select
+                  className="h-10 w-full rounded-xl border px-3 text-sm bg-white"
+                  value={form.school_id}
+                  onChange={(e) => setForm({ ...form, school_id: e.target.value })}
+                  disabled={form.role === "platform_admin"}
+                >
+                  <option value="">اختر مدرسة</option>
+                  {schools.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} {s.code ? `(${s.code})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <Button variant="outline" className="rounded-2xl" onClick={() => setOpenEdit(false)}>
+                إلغاء
+              </Button>
+              <Button disabled={saving} onClick={updateUser} className="rounded-2xl">
+                {saving ? "جاري..." : "حفظ التعديل"}
               </Button>
             </div>
           </div>
