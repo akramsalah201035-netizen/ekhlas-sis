@@ -55,13 +55,15 @@ type NoteRow = {
   visibility: string | null; // public/private/internal
 };
 
-type ActionRow = {
+type ActionRowUI = {
   id: string;
   created_at: string;
   action_type: string;
   title: string;
-  note: string | null;
-  status: string | null;
+  details: string | null;
+  severity: number | null;
+  requires_parent: boolean | null;
+  created_by_name: string | null;
 };
 
 function TabBtn({
@@ -95,6 +97,13 @@ function visibilityBadge(v: string | null | undefined) {
   return <Badge variant="secondary">—</Badge>;
 }
 
+function severityBadge(s: number | null | undefined) {
+  if (s === null || s === undefined) return <Badge variant="secondary">—</Badge>;
+  if (s >= 4) return <Badge variant="destructive">High</Badge>;
+  if (s === 3) return <Badge className="bg-orange-600">Med</Badge>;
+  return <Badge variant="secondary">Low</Badge>;
+}
+
 export default function StudentReportPage() {
   const supabase = useMemo(() => supabaseBrowser(), []);
   const [loading, setLoading] = useState(true);
@@ -109,7 +118,7 @@ export default function StudentReportPage() {
   const [att, setAtt] = useState<AttendanceRow[]>([]);
   const [beh, setBeh] = useState<BehaviorRowUI[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
-  const [actions, setActions] = useState<ActionRow[]>([]);
+  const [actions, setActions] = useState<ActionRowUI[]>([]);
 
   async function load() {
     setLoading(true);
@@ -267,7 +276,7 @@ export default function StudentReportPage() {
       );
     }
 
-    // ---------- BEHAVIOR (category/title/note + subject/teacher names) ----------
+    // ---------- BEHAVIOR ----------
     try {
       const b = await supabase
         .from("student_behavior_logs")
@@ -316,14 +325,13 @@ export default function StudentReportPage() {
       setErrMsg((prev) => prev || `Behavior error: ${e?.message ?? "unknown"}`);
     }
 
-    // ---------- NOTES (teacher_id + visibility) ----------
+    // ---------- NOTES ----------
     try {
       const n = await supabase
         .from("student_notes")
         .select("id,created_at,note,teacher_id,subject_id,visibility")
         .eq("student_id", uid)
-        // ✅ الطالب مايشوفش internal
-        .neq("visibility", "internal")
+        .neq("visibility", "internal") // ✅ hide internal from student
         .order("created_at", { ascending: false });
 
       if (n.error) throw n.error;
@@ -365,17 +373,39 @@ export default function StudentReportPage() {
       setErrMsg((prev) => prev || `Notes error: ${e?.message ?? "unknown"}`);
     }
 
-    // ---------- ACTIONS ----------
+    // ---------- ACTIONS (✅ fixed: details/severity/requires_parent/created_by) ----------
     try {
       const ac = await supabase
         .from("student_actions")
-        .select("id,created_at,action_type,title,note,status")
+        .select("id,created_at,action_type,title,details,severity,requires_parent,created_by")
         .eq("student_id", uid)
         .order("created_at", { ascending: false });
 
       if (ac.error) throw ac.error;
 
-      setActions((ac.data ?? []) as ActionRow[]);
+      const creatorIds = Array.from(
+        new Set((ac.data ?? []).map((x: any) => x.created_by).filter(Boolean))
+      );
+
+      const creators = creatorIds.length
+        ? await supabase.from("profiles").select("id,full_name").in("id", creatorIds)
+        : { data: [] as any[], error: null };
+
+      const cMap: Record<string, string> = {};
+      (creators.data ?? []).forEach((c: any) => (cMap[c.id] = c.full_name));
+
+      const mapped: ActionRowUI[] = (ac.data ?? []).map((x: any) => ({
+        id: x.id,
+        created_at: x.created_at,
+        action_type: x.action_type,
+        title: x.title,
+        details: x.details ?? null,
+        severity: x.severity ?? null,
+        requires_parent: x.requires_parent ?? null,
+        created_by_name: x.created_by ? (cMap[x.created_by] ?? "—") : "—",
+      }));
+
+      setActions(mapped);
     } catch (e: any) {
       setActions([]);
       setErrMsg((prev) => prev || `Actions error: ${e?.message ?? "unknown"}`);
@@ -410,8 +440,7 @@ export default function StudentReportPage() {
       ? notes.length
       : actions.length;
 
-  const colSpan =
-    tab === "behavior" ? 7 : tab === "notes" ? 5 : 4;
+  const colSpan = tab === "behavior" ? 7 : tab === "notes" ? 5 : tab === "actions" ? 7 : 4;
 
   return (
     <AppShell>
@@ -443,16 +472,10 @@ export default function StudentReportPage() {
           <TabBtn active={tab === "grades"} onClick={() => setTab("grades")}>
             الدرجات
           </TabBtn>
-          <TabBtn
-            active={tab === "attendance"}
-            onClick={() => setTab("attendance")}
-          >
+          <TabBtn active={tab === "attendance"} onClick={() => setTab("attendance")}>
             الحضور
           </TabBtn>
-          <TabBtn
-            active={tab === "behavior"}
-            onClick={() => setTab("behavior")}
-          >
+          <TabBtn active={tab === "behavior"} onClick={() => setTab("behavior")}>
             السلوك
           </TabBtn>
           <TabBtn active={tab === "notes"} onClick={() => setTab("notes")}>
@@ -478,9 +501,7 @@ export default function StudentReportPage() {
                 ? "الملاحظات"
                 : "إجراءات HR"}
             </div>
-            <Badge variant="secondary" dir="ltr">
-              {loading ? "…" : count}
-            </Badge>
+            <Badge variant="secondary" dir="ltr">{loading ? "…" : count}</Badge>
           </div>
 
           <div className="rounded-2xl border-t bg-white overflow-hidden">
@@ -522,7 +543,10 @@ export default function StudentReportPage() {
                   <TableRow>
                     <TableHead>النوع</TableHead>
                     <TableHead>العنوان</TableHead>
-                    <TableHead>الحالة</TableHead>
+                    <TableHead>الشدة</TableHead>
+                    <TableHead>يتطلب ولي أمر</TableHead>
+                    <TableHead>التفاصيل</TableHead>
+                    <TableHead>المنشئ</TableHead>
                     <TableHead>التاريخ</TableHead>
                   </TableRow>
                 )}
@@ -531,37 +555,21 @@ export default function StudentReportPage() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell
-                      colSpan={colSpan}
-                      className="py-10 text-center text-slate-500"
-                    >
+                    <TableCell colSpan={colSpan} className="py-10 text-center text-slate-500">
                       جاري التحميل...
                     </TableCell>
                   </TableRow>
                 ) : tab === "grades" ? (
                   grades.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="py-10 text-center text-slate-500"
-                      >
-                        لا توجد درجات
-                      </TableCell>
-                    </TableRow>
+                    <TableRow><TableCell colSpan={4} className="py-10 text-center text-slate-500">لا توجد درجات</TableCell></TableRow>
                   ) : (
                     grades.map((g) => (
                       <TableRow key={g.id}>
-                        <TableCell className="font-medium">
-                          {g.subject_name ?? "—"}
-                        </TableCell>
+                        <TableCell className="font-medium">{g.subject_name ?? "—"}</TableCell>
                         <TableCell>{g.assessment_title ?? "—"}</TableCell>
                         <TableCell dir="ltr">
                           {g.score ?? "—"}{" "}
-                          {g.max_score != null ? (
-                            <span className="text-slate-400">
-                              / {g.max_score}
-                            </span>
-                          ) : null}
+                          {g.max_score != null ? <span className="text-slate-400">/ {g.max_score}</span> : null}
                         </TableCell>
                         <TableCell>{g.note ?? "—"}</TableCell>
                       </TableRow>
@@ -569,20 +577,11 @@ export default function StudentReportPage() {
                   )
                 ) : tab === "attendance" ? (
                   att.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="py-10 text-center text-slate-500"
-                      >
-                        لا توجد سجلات حضور
-                      </TableCell>
-                    </TableRow>
+                    <TableRow><TableCell colSpan={4} className="py-10 text-center text-slate-500">لا توجد سجلات حضور</TableCell></TableRow>
                   ) : (
                     att.map((a) => (
                       <TableRow key={a.id}>
-                        <TableCell className="font-medium">
-                          {a.subject_name ?? "—"}
-                        </TableCell>
+                        <TableCell className="font-medium">{a.subject_name ?? "—"}</TableCell>
                         <TableCell dir="ltr">{a.session_date ?? "—"}</TableCell>
                         <TableCell dir="ltr">{a.period_no ?? "—"}</TableCell>
                         <TableCell>{a.status}</TableCell>
@@ -591,78 +590,46 @@ export default function StudentReportPage() {
                   )
                 ) : tab === "behavior" ? (
                   beh.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={7}
-                        className="py-10 text-center text-slate-500"
-                      >
-                        لا توجد سجلات سلوك
-                      </TableCell>
-                    </TableRow>
+                    <TableRow><TableCell colSpan={7} className="py-10 text-center text-slate-500">لا توجد سجلات سلوك</TableCell></TableRow>
                   ) : (
                     beh.map((b) => (
                       <TableRow key={b.id}>
-                        <TableCell className="font-medium">
-                          {b.subject_name ?? "—"}
-                        </TableCell>
+                        <TableCell className="font-medium">{b.subject_name ?? "—"}</TableCell>
                         <TableCell>{b.teacher_name ?? "—"}</TableCell>
                         <TableCell>{b.title ?? "—"}</TableCell>
                         <TableCell>{b.category ?? "—"}</TableCell>
                         <TableCell dir="ltr">{b.points ?? "—"}</TableCell>
-                        <TableCell className="text-slate-700">
-                          {b.note ?? "—"}
-                        </TableCell>
-                        <TableCell dir="ltr">
-                          {String(b.created_at).slice(0, 10)}
-                        </TableCell>
+                        <TableCell className="text-slate-700">{b.note ?? "—"}</TableCell>
+                        <TableCell dir="ltr">{String(b.created_at).slice(0, 10)}</TableCell>
                       </TableRow>
                     ))
                   )
                 ) : tab === "notes" ? (
                   notes.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={5}
-                        className="py-10 text-center text-slate-500"
-                      >
-                        لا توجد ملاحظات
-                      </TableCell>
-                    </TableRow>
+                    <TableRow><TableCell colSpan={5} className="py-10 text-center text-slate-500">لا توجد ملاحظات</TableCell></TableRow>
                   ) : (
                     notes.map((n) => (
                       <TableRow key={n.id}>
-                        <TableCell className="font-medium">
-                          {n.subject_name ?? "—"}
-                        </TableCell>
+                        <TableCell className="font-medium">{n.subject_name ?? "—"}</TableCell>
                         <TableCell>{n.teacher_name ?? "—"}</TableCell>
                         <TableCell>{n.note}</TableCell>
                         <TableCell>{visibilityBadge(n.visibility)}</TableCell>
-                        <TableCell dir="ltr">
-                          {String(n.created_at).slice(0, 10)}
-                        </TableCell>
+                        <TableCell dir="ltr">{String(n.created_at).slice(0, 10)}</TableCell>
                       </TableRow>
                     ))
                   )
                 ) : actions.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={4}
-                      className="py-10 text-center text-slate-500"
-                    >
-                      لا توجد إجراءات
-                    </TableCell>
-                  </TableRow>
+                  <TableRow><TableCell colSpan={7} className="py-10 text-center text-slate-500">لا توجد إجراءات</TableCell></TableRow>
                 ) : (
                   actions.map((a) => (
                     <TableRow key={a.id}>
-                      <TableCell className="font-medium">
-                        {a.action_type}
-                      </TableCell>
+                      <TableCell className="font-medium">{a.action_type}</TableCell>
                       <TableCell>{a.title}</TableCell>
-                      <TableCell>{a.status ?? "—"}</TableCell>
-                      <TableCell dir="ltr">
-                        {String(a.created_at).slice(0, 10)}
-                      </TableCell>
+                      <TableCell>{severityBadge(a.severity)}</TableCell>
+                      <TableCell>{a.requires_parent ? <Badge className="bg-blue-600">Yes</Badge> : <Badge variant="secondary">No</Badge>}</TableCell>
+                      <TableCell className="text-slate-700">{a.details ?? "—"}</TableCell>
+                      <TableCell>{a.created_by_name ?? "—"}</TableCell>
+                      <TableCell dir="ltr">{String(a.created_at).slice(0, 10)}</TableCell>
                     </TableRow>
                   ))
                 )}
