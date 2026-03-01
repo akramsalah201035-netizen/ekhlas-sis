@@ -35,13 +35,6 @@ type AttendanceRow = {
   period_no: number | null;
 };
 
-type NoteRow = {
-  id: string;
-  created_at: string;
-  note: string;
-  created_by: string | null;
-};
-
 type BehaviorRowUI = {
   id: string;
   created_at: string;
@@ -51,6 +44,15 @@ type BehaviorRowUI = {
   note: string | null;
   subject_name: string | null;
   teacher_name: string | null;
+};
+
+type NoteRow = {
+  id: string;
+  created_at: string;
+  note: string;
+  teacher_name: string | null;
+  subject_name: string | null;
+  visibility: string | null; // public/private/internal
 };
 
 type ActionRow = {
@@ -86,6 +88,13 @@ function TabBtn({
   );
 }
 
+function visibilityBadge(v: string | null | undefined) {
+  if (v === "public") return <Badge className="bg-emerald-600">Public</Badge>;
+  if (v === "private") return <Badge variant="secondary">Private</Badge>;
+  if (v === "internal") return <Badge variant="destructive">Internal</Badge>;
+  return <Badge variant="secondary">—</Badge>;
+}
+
 export default function StudentReportPage() {
   const supabase = useMemo(() => supabaseBrowser(), []);
   const [loading, setLoading] = useState(true);
@@ -98,8 +107,8 @@ export default function StudentReportPage() {
 
   const [grades, setGrades] = useState<GradeRow[]>([]);
   const [att, setAtt] = useState<AttendanceRow[]>([]);
-  const [notes, setNotes] = useState<NoteRow[]>([]);
   const [beh, setBeh] = useState<BehaviorRowUI[]>([]);
+  const [notes, setNotes] = useState<NoteRow[]>([]);
   const [actions, setActions] = useState<ActionRow[]>([]);
 
   async function load() {
@@ -258,7 +267,7 @@ export default function StudentReportPage() {
       );
     }
 
-    // ---------- BEHAVIOR (✅ fixed columns: category/title/note + subject/teacher names) ----------
+    // ---------- BEHAVIOR (category/title/note + subject/teacher names) ----------
     try {
       const b = await supabase
         .from("student_behavior_logs")
@@ -307,17 +316,50 @@ export default function StudentReportPage() {
       setErrMsg((prev) => prev || `Behavior error: ${e?.message ?? "unknown"}`);
     }
 
-    // ---------- NOTES ----------
+    // ---------- NOTES (teacher_id + visibility) ----------
     try {
       const n = await supabase
         .from("student_notes")
-        .select("id,created_at,note,created_by")
+        .select("id,created_at,note,teacher_id,subject_id,visibility")
         .eq("student_id", uid)
+        // ✅ الطالب مايشوفش internal
+        .neq("visibility", "internal")
         .order("created_at", { ascending: false });
 
       if (n.error) throw n.error;
 
-      setNotes((n.data ?? []) as NoteRow[]);
+      const teacherIds = Array.from(
+        new Set((n.data ?? []).map((x: any) => x.teacher_id).filter(Boolean))
+      );
+      const subjectIds = Array.from(
+        new Set((n.data ?? []).map((x: any) => x.subject_id).filter(Boolean))
+      );
+
+      const [teachers, subs] = await Promise.all([
+        teacherIds.length
+          ? supabase.from("profiles").select("id,full_name").in("id", teacherIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        subjectIds.length
+          ? supabase.from("subjects").select("id,name").in("id", subjectIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+      ]);
+
+      const tMap: Record<string, string> = {};
+      (teachers.data ?? []).forEach((t: any) => (tMap[t.id] = t.full_name));
+
+      const sMap: Record<string, string> = {};
+      (subs.data ?? []).forEach((s: any) => (sMap[s.id] = s.name));
+
+      const mapped: NoteRow[] = (n.data ?? []).map((x: any) => ({
+        id: x.id,
+        created_at: x.created_at,
+        note: x.note,
+        teacher_name: x.teacher_id ? (tMap[x.teacher_id] ?? "—") : "—",
+        subject_name: x.subject_id ? (sMap[x.subject_id] ?? "—") : "—",
+        visibility: x.visibility ?? null,
+      }));
+
+      setNotes(mapped);
     } catch (e: any) {
       setNotes([]);
       setErrMsg((prev) => prev || `Notes error: ${e?.message ?? "unknown"}`);
@@ -367,6 +409,9 @@ export default function StudentReportPage() {
       : tab === "notes"
       ? notes.length
       : actions.length;
+
+  const colSpan =
+    tab === "behavior" ? 7 : tab === "notes" ? 5 : 4;
 
   return (
     <AppShell>
@@ -467,7 +512,10 @@ export default function StudentReportPage() {
                   </TableRow>
                 ) : tab === "notes" ? (
                   <TableRow>
+                    <TableHead>المادة</TableHead>
+                    <TableHead>المدرس</TableHead>
                     <TableHead>الملاحظة</TableHead>
+                    <TableHead>الرؤية</TableHead>
                     <TableHead>التاريخ</TableHead>
                   </TableRow>
                 ) : (
@@ -484,7 +532,7 @@ export default function StudentReportPage() {
                 {loading ? (
                   <TableRow>
                     <TableCell
-                      colSpan={tab === "behavior" ? 7 : 4}
+                      colSpan={colSpan}
                       className="py-10 text-center text-slate-500"
                     >
                       جاري التحميل...
@@ -574,7 +622,7 @@ export default function StudentReportPage() {
                   notes.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={2}
+                        colSpan={5}
                         className="py-10 text-center text-slate-500"
                       >
                         لا توجد ملاحظات
@@ -583,7 +631,12 @@ export default function StudentReportPage() {
                   ) : (
                     notes.map((n) => (
                       <TableRow key={n.id}>
+                        <TableCell className="font-medium">
+                          {n.subject_name ?? "—"}
+                        </TableCell>
+                        <TableCell>{n.teacher_name ?? "—"}</TableCell>
                         <TableCell>{n.note}</TableCell>
+                        <TableCell>{visibilityBadge(n.visibility)}</TableCell>
                         <TableCell dir="ltr">
                           {String(n.created_at).slice(0, 10)}
                         </TableCell>
