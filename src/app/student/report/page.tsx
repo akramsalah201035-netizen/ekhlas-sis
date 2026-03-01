@@ -8,7 +8,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 
 type GradeRow = {
@@ -19,6 +24,7 @@ type GradeRow = {
   subject_name: string | null;
   max_score: number | null;
   date: string | null;
+  note: string | null;
 };
 
 type AttendanceRow = {
@@ -29,17 +35,50 @@ type AttendanceRow = {
   period_no: number | null;
 };
 
-type NoteRow = { id: string; created_at: string; note: string; created_by: string | null };
-type BehaviorRow = { id: string; created_at: string; behavior_type: string; points: number | null; details: string | null };
-type ActionRow = { id: string; created_at: string; action_type: string; title: string; note: string | null; status: string | null };
+type NoteRow = {
+  id: string;
+  created_at: string;
+  note: string;
+  created_by: string | null;
+};
 
-function TabBtn({ active, children, onClick }: any) {
+type BehaviorRowUI = {
+  id: string;
+  created_at: string;
+  category: string | null;
+  points: number | null;
+  title: string | null;
+  note: string | null;
+  subject_name: string | null;
+  teacher_name: string | null;
+};
+
+type ActionRow = {
+  id: string;
+  created_at: string;
+  action_type: string;
+  title: string;
+  note: string | null;
+  status: string | null;
+};
+
+function TabBtn({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: any;
+  onClick: () => void;
+}) {
   return (
     <button
       onClick={onClick}
       className={[
         "px-4 py-2 rounded-2xl text-sm font-semibold transition border",
-        active ? "bg-slate-900 text-white border-slate-900" : "bg-white hover:bg-slate-50 text-slate-700",
+        active
+          ? "bg-slate-900 text-white border-slate-900"
+          : "bg-white hover:bg-slate-50 text-slate-700",
       ].join(" ")}
     >
       {children}
@@ -53,12 +92,14 @@ export default function StudentReportPage() {
   const [name, setName] = useState("—");
   const [errMsg, setErrMsg] = useState<string>("");
 
-  const [tab, setTab] = useState<"grades" | "attendance" | "behavior" | "notes" | "actions">("grades");
+  const [tab, setTab] = useState<
+    "grades" | "attendance" | "behavior" | "notes" | "actions"
+  >("grades");
 
   const [grades, setGrades] = useState<GradeRow[]>([]);
   const [att, setAtt] = useState<AttendanceRow[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
-  const [beh, setBeh] = useState<BehaviorRow[]>([]);
+  const [beh, setBeh] = useState<BehaviorRowUI[]>([]);
   const [actions, setActions] = useState<ActionRow[]>([]);
 
   async function load() {
@@ -67,24 +108,33 @@ export default function StudentReportPage() {
 
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth.user?.id;
-    if (!uid) { setLoading(false); return; }
+    if (!uid) {
+      setLoading(false);
+      return;
+    }
 
     // اسم الطالب
-    const p = await supabase.from("profiles").select("full_name").eq("id", uid).single();
+    const p = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", uid)
+      .single();
     setName(p.data?.full_name ?? "—");
 
-    // ---------- GRADES (بدون joins) ----------
+    // ---------- GRADES ----------
     try {
       const sc = await supabase
         .from("student_scores")
-        .select("id,score,assessment_id")
+        .select("id,assessment_id,student_id,score,note,created_at")
         .eq("student_id", uid)
         .order("created_at", { ascending: false });
 
       if (sc.error) throw sc.error;
 
       const rows = (sc.data ?? []) as any[];
-      const assessmentIds = Array.from(new Set(rows.map(r => r.assessment_id).filter(Boolean)));
+      const assessmentIds = Array.from(
+        new Set(rows.map((r) => r.assessment_id).filter(Boolean))
+      );
 
       let assessmentsMap: Record<string, any> = {};
       let subjectsMap: Record<string, any> = {};
@@ -97,13 +147,25 @@ export default function StudentReportPage() {
 
         if (a.error) throw a.error;
 
-        (a.data ?? []).forEach((x: any) => { assessmentsMap[x.id] = x; });
+        (a.data ?? []).forEach((x: any) => {
+          assessmentsMap[x.id] = x;
+        });
 
-        const subjectIds = Array.from(new Set((a.data ?? []).map((x: any) => x.subject_id).filter(Boolean)));
+        const subjectIds = Array.from(
+          new Set((a.data ?? []).map((x: any) => x.subject_id).filter(Boolean))
+        );
+
         if (subjectIds.length) {
-          const s = await supabase.from("subjects").select("id,name").in("id", subjectIds);
+          const s = await supabase
+            .from("subjects")
+            .select("id,name")
+            .in("id", subjectIds);
+
           if (s.error) throw s.error;
-          (s.data ?? []).forEach((x: any) => { subjectsMap[x.id] = x; });
+
+          (s.data ?? []).forEach((x: any) => {
+            subjectsMap[x.id] = x;
+          });
         }
       }
 
@@ -112,12 +174,13 @@ export default function StudentReportPage() {
         const sub = a?.subject_id ? subjectsMap[a.subject_id] : null;
         return {
           id: r.id,
-          score: r.score,
+          score: r.score ?? null,
           assessment_id: r.assessment_id,
           assessment_title: a?.title ?? null,
           subject_name: sub?.name ?? null,
           max_score: a?.max_score ?? null,
           date: a?.date ?? null,
+          note: r.note ?? null,
         };
       });
 
@@ -127,18 +190,20 @@ export default function StudentReportPage() {
       setErrMsg((prev) => prev || `Grades error: ${e?.message ?? "unknown"}`);
     }
 
-    // ---------- ATTENDANCE (بدون joins) ----------
+    // ---------- ATTENDANCE ----------
     try {
       const sa = await supabase
         .from("session_attendance")
-        .select("id,status,session_id")
+        .select("id,student_id,session_id,status,created_at")
         .eq("student_id", uid)
         .order("created_at", { ascending: false });
 
       if (sa.error) throw sa.error;
 
       const aRows = (sa.data ?? []) as any[];
-      const sessionIds = Array.from(new Set(aRows.map(r => r.session_id).filter(Boolean)));
+      const sessionIds = Array.from(
+        new Set(aRows.map((r) => r.session_id).filter(Boolean))
+      );
 
       let sessionsMap: Record<string, any> = {};
       let subjectsMap2: Record<string, any> = {};
@@ -150,13 +215,26 @@ export default function StudentReportPage() {
           .in("id", sessionIds);
 
         if (cs.error) throw cs.error;
-        (cs.data ?? []).forEach((x: any) => { sessionsMap[x.id] = x; });
 
-        const subjectIds = Array.from(new Set((cs.data ?? []).map((x: any) => x.subject_id).filter(Boolean)));
+        (cs.data ?? []).forEach((x: any) => {
+          sessionsMap[x.id] = x;
+        });
+
+        const subjectIds = Array.from(
+          new Set((cs.data ?? []).map((x: any) => x.subject_id).filter(Boolean))
+        );
+
         if (subjectIds.length) {
-          const s2 = await supabase.from("subjects").select("id,name").in("id", subjectIds);
+          const s2 = await supabase
+            .from("subjects")
+            .select("id,name")
+            .in("id", subjectIds);
+
           if (s2.error) throw s2.error;
-          (s2.data ?? []).forEach((x: any) => { subjectsMap2[x.id] = x; });
+
+          (s2.data ?? []).forEach((x: any) => {
+            subjectsMap2[x.id] = x;
+          });
         }
       }
 
@@ -175,19 +253,55 @@ export default function StudentReportPage() {
       setAtt(mappedAtt);
     } catch (e: any) {
       setAtt([]);
-      setErrMsg((prev) => prev || `Attendance error: ${e?.message ?? "unknown"}`);
+      setErrMsg(
+        (prev) => prev || `Attendance error: ${e?.message ?? "unknown"}`
+      );
     }
 
-    // ---------- BEHAVIOR ----------
+    // ---------- BEHAVIOR (✅ fixed columns: category/title/note + subject/teacher names) ----------
     try {
       const b = await supabase
         .from("student_behavior_logs")
-        .select("id,created_at,behavior_type,points,details")
+        .select("id,created_at,category,points,title,note,subject_id,teacher_id")
         .eq("student_id", uid)
         .order("created_at", { ascending: false });
 
       if (b.error) throw b.error;
-      setBeh((b.data ?? []) as BehaviorRow[]);
+
+      const subjectIds = Array.from(
+        new Set((b.data ?? []).map((x: any) => x.subject_id).filter(Boolean))
+      );
+      const teacherIds = Array.from(
+        new Set((b.data ?? []).map((x: any) => x.teacher_id).filter(Boolean))
+      );
+
+      const [subs, teachers] = await Promise.all([
+        subjectIds.length
+          ? supabase.from("subjects").select("id,name").in("id", subjectIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        teacherIds.length
+          ? supabase.from("profiles").select("id,full_name").in("id", teacherIds)
+          : Promise.resolve({ data: [] as any[], error: null }),
+      ]);
+
+      const subMap: Record<string, string> = {};
+      (subs.data ?? []).forEach((s: any) => (subMap[s.id] = s.name));
+
+      const tMap: Record<string, string> = {};
+      (teachers.data ?? []).forEach((t: any) => (tMap[t.id] = t.full_name));
+
+      const mapped: BehaviorRowUI[] = (b.data ?? []).map((x: any) => ({
+        id: x.id,
+        created_at: x.created_at,
+        category: x.category ?? null,
+        points: x.points ?? null,
+        title: x.title ?? null,
+        note: x.note ?? null,
+        subject_name: x.subject_id ? subMap[x.subject_id] ?? "—" : "—",
+        teacher_name: x.teacher_id ? tMap[x.teacher_id] ?? "—" : "—",
+      }));
+
+      setBeh(mapped);
     } catch (e: any) {
       setBeh([]);
       setErrMsg((prev) => prev || `Behavior error: ${e?.message ?? "unknown"}`);
@@ -202,6 +316,7 @@ export default function StudentReportPage() {
         .order("created_at", { ascending: false });
 
       if (n.error) throw n.error;
+
       setNotes((n.data ?? []) as NoteRow[]);
     } catch (e: any) {
       setNotes([]);
@@ -217,6 +332,7 @@ export default function StudentReportPage() {
         .order("created_at", { ascending: false });
 
       if (ac.error) throw ac.error;
+
       setActions((ac.data ?? []) as ActionRow[]);
     } catch (e: any) {
       setActions([]);
@@ -228,7 +344,13 @@ export default function StudentReportPage() {
 
   useEffect(() => {
     const h = window.location.hash.replace("#", "");
-    if (h === "grades" || h === "attendance" || h === "behavior" || h === "notes" || h === "actions") {
+    if (
+      h === "grades" ||
+      h === "attendance" ||
+      h === "behavior" ||
+      h === "notes" ||
+      h === "actions"
+    ) {
       setTab(h as any);
     }
     load();
@@ -236,10 +358,15 @@ export default function StudentReportPage() {
   }, []);
 
   const count =
-    tab === "grades" ? grades.length :
-    tab === "attendance" ? att.length :
-    tab === "behavior" ? beh.length :
-    tab === "notes" ? notes.length : actions.length;
+    tab === "grades"
+      ? grades.length
+      : tab === "attendance"
+      ? att.length
+      : tab === "behavior"
+      ? beh.length
+      : tab === "notes"
+      ? notes.length
+      : actions.length;
 
   return (
     <AppShell>
@@ -247,7 +374,12 @@ export default function StudentReportPage() {
         <PageHeader title="تقرير الطالب" subtitle="كل بياناتك في مكان واحد" />
         <div className="flex gap-2">
           <Badge variant="secondary">{name}</Badge>
-          <Button variant="outline" className="rounded-2xl" onClick={load} disabled={loading}>
+          <Button
+            variant="outline"
+            className="rounded-2xl"
+            onClick={load}
+            disabled={loading}
+          >
             {loading ? "..." : "تحديث"}
           </Button>
         </div>
@@ -257,20 +389,33 @@ export default function StudentReportPage() {
         <Card className="rounded-2xl mb-4">
           <CardContent className="p-4 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-2xl">
             {errMsg}
-            <div className="text-xs text-rose-600 mt-1">
-              (ده غالبًا RLS Policy أو جدول مش موجود أو student_id مش مطابق)
-            </div>
           </CardContent>
         </Card>
       ) : null}
 
       <Card className="rounded-2xl mb-4">
         <CardContent className="p-4 flex flex-wrap gap-2">
-          <TabBtn active={tab === "grades"} onClick={() => setTab("grades")}>الدرجات</TabBtn>
-          <TabBtn active={tab === "attendance"} onClick={() => setTab("attendance")}>الحضور</TabBtn>
-          <TabBtn active={tab === "behavior"} onClick={() => setTab("behavior")}>السلوك</TabBtn>
-          <TabBtn active={tab === "notes"} onClick={() => setTab("notes")}>الملاحظات</TabBtn>
-          <TabBtn active={tab === "actions"} onClick={() => setTab("actions")}>إجراءات HR</TabBtn>
+          <TabBtn active={tab === "grades"} onClick={() => setTab("grades")}>
+            الدرجات
+          </TabBtn>
+          <TabBtn
+            active={tab === "attendance"}
+            onClick={() => setTab("attendance")}
+          >
+            الحضور
+          </TabBtn>
+          <TabBtn
+            active={tab === "behavior"}
+            onClick={() => setTab("behavior")}
+          >
+            السلوك
+          </TabBtn>
+          <TabBtn active={tab === "notes"} onClick={() => setTab("notes")}>
+            الملاحظات
+          </TabBtn>
+          <TabBtn active={tab === "actions"} onClick={() => setTab("actions")}>
+            إجراءات HR
+          </TabBtn>
         </CardContent>
       </Card>
 
@@ -278,12 +423,19 @@ export default function StudentReportPage() {
         <CardContent className="p-0">
           <div className="p-6 border-b flex items-center justify-between">
             <div className="text-lg font-bold">
-              {tab === "grades" ? "الدرجات" :
-               tab === "attendance" ? "الحضور" :
-               tab === "behavior" ? "السلوك" :
-               tab === "notes" ? "الملاحظات" : "إجراءات HR"}
+              {tab === "grades"
+                ? "الدرجات"
+                : tab === "attendance"
+                ? "الحضور"
+                : tab === "behavior"
+                ? "السلوك"
+                : tab === "notes"
+                ? "الملاحظات"
+                : "إجراءات HR"}
             </div>
-            <Badge variant="secondary" dir="ltr">{loading ? "…" : count}</Badge>
+            <Badge variant="secondary" dir="ltr">
+              {loading ? "…" : count}
+            </Badge>
           </div>
 
           <div className="rounded-2xl border-t bg-white overflow-hidden">
@@ -294,7 +446,7 @@ export default function StudentReportPage() {
                     <TableHead>المادة</TableHead>
                     <TableHead>الاختبار</TableHead>
                     <TableHead>الدرجة</TableHead>
-                    <TableHead>التاريخ</TableHead>
+                    <TableHead>ملاحظة</TableHead>
                   </TableRow>
                 ) : tab === "attendance" ? (
                   <TableRow>
@@ -305,9 +457,12 @@ export default function StudentReportPage() {
                   </TableRow>
                 ) : tab === "behavior" ? (
                   <TableRow>
-                    <TableHead>النوع</TableHead>
+                    <TableHead>المادة</TableHead>
+                    <TableHead>المدرس</TableHead>
+                    <TableHead>العنوان</TableHead>
+                    <TableHead>التصنيف</TableHead>
                     <TableHead>النقاط</TableHead>
-                    <TableHead>تفاصيل</TableHead>
+                    <TableHead>الملاحظة</TableHead>
                     <TableHead>التاريخ</TableHead>
                   </TableRow>
                 ) : tab === "notes" ? (
@@ -327,60 +482,134 @@ export default function StudentReportPage() {
 
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={4} className="py-10 text-center text-slate-500">جاري التحميل...</TableCell></TableRow>
+                  <TableRow>
+                    <TableCell
+                      colSpan={tab === "behavior" ? 7 : 4}
+                      className="py-10 text-center text-slate-500"
+                    >
+                      جاري التحميل...
+                    </TableCell>
+                  </TableRow>
                 ) : tab === "grades" ? (
                   grades.length === 0 ? (
-                    <TableRow><TableCell colSpan={4} className="py-10 text-center text-slate-500">لا توجد درجات</TableCell></TableRow>
-                  ) : grades.map((g) => (
-                    <TableRow key={g.id}>
-                      <TableCell className="font-medium">{g.subject_name ?? "—"}</TableCell>
-                      <TableCell>{g.assessment_title ?? "—"}</TableCell>
-                      <TableCell dir="ltr">
-                        {g.score ?? "—"} {g.max_score != null ? <span className="text-slate-400">/ {g.max_score}</span> : null}
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="py-10 text-center text-slate-500"
+                      >
+                        لا توجد درجات
                       </TableCell>
-                      <TableCell dir="ltr">{g.date ?? "—"}</TableCell>
                     </TableRow>
-                  ))
+                  ) : (
+                    grades.map((g) => (
+                      <TableRow key={g.id}>
+                        <TableCell className="font-medium">
+                          {g.subject_name ?? "—"}
+                        </TableCell>
+                        <TableCell>{g.assessment_title ?? "—"}</TableCell>
+                        <TableCell dir="ltr">
+                          {g.score ?? "—"}{" "}
+                          {g.max_score != null ? (
+                            <span className="text-slate-400">
+                              / {g.max_score}
+                            </span>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>{g.note ?? "—"}</TableCell>
+                      </TableRow>
+                    ))
+                  )
                 ) : tab === "attendance" ? (
                   att.length === 0 ? (
-                    <TableRow><TableCell colSpan={4} className="py-10 text-center text-slate-500">لا توجد سجلات حضور</TableCell></TableRow>
-                  ) : att.map((a) => (
-                    <TableRow key={a.id}>
-                      <TableCell className="font-medium">{a.subject_name ?? "—"}</TableCell>
-                      <TableCell dir="ltr">{a.session_date ?? "—"}</TableCell>
-                      <TableCell dir="ltr">{a.period_no ?? "—"}</TableCell>
-                      <TableCell>{a.status}</TableCell>
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="py-10 text-center text-slate-500"
+                      >
+                        لا توجد سجلات حضور
+                      </TableCell>
                     </TableRow>
-                  ))
+                  ) : (
+                    att.map((a) => (
+                      <TableRow key={a.id}>
+                        <TableCell className="font-medium">
+                          {a.subject_name ?? "—"}
+                        </TableCell>
+                        <TableCell dir="ltr">{a.session_date ?? "—"}</TableCell>
+                        <TableCell dir="ltr">{a.period_no ?? "—"}</TableCell>
+                        <TableCell>{a.status}</TableCell>
+                      </TableRow>
+                    ))
+                  )
                 ) : tab === "behavior" ? (
                   beh.length === 0 ? (
-                    <TableRow><TableCell colSpan={4} className="py-10 text-center text-slate-500">لا توجد سجلات سلوك</TableCell></TableRow>
-                  ) : beh.map((b) => (
-                    <TableRow key={b.id}>
-                      <TableCell className="font-medium">{b.behavior_type}</TableCell>
-                      <TableCell dir="ltr">{b.points ?? "—"}</TableCell>
-                      <TableCell>{b.details ?? "—"}</TableCell>
-                      <TableCell dir="ltr">{b.created_at.slice(0,10)}</TableCell>
+                    <TableRow>
+                      <TableCell
+                        colSpan={7}
+                        className="py-10 text-center text-slate-500"
+                      >
+                        لا توجد سجلات سلوك
+                      </TableCell>
                     </TableRow>
-                  ))
+                  ) : (
+                    beh.map((b) => (
+                      <TableRow key={b.id}>
+                        <TableCell className="font-medium">
+                          {b.subject_name ?? "—"}
+                        </TableCell>
+                        <TableCell>{b.teacher_name ?? "—"}</TableCell>
+                        <TableCell>{b.title ?? "—"}</TableCell>
+                        <TableCell>{b.category ?? "—"}</TableCell>
+                        <TableCell dir="ltr">{b.points ?? "—"}</TableCell>
+                        <TableCell className="text-slate-700">
+                          {b.note ?? "—"}
+                        </TableCell>
+                        <TableCell dir="ltr">
+                          {String(b.created_at).slice(0, 10)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )
                 ) : tab === "notes" ? (
                   notes.length === 0 ? (
-                    <TableRow><TableCell colSpan={2} className="py-10 text-center text-slate-500">لا توجد ملاحظات</TableCell></TableRow>
-                  ) : notes.map((n) => (
-                    <TableRow key={n.id}>
-                      <TableCell>{n.note}</TableCell>
-                      <TableCell dir="ltr">{n.created_at.slice(0,10)}</TableCell>
+                    <TableRow>
+                      <TableCell
+                        colSpan={2}
+                        className="py-10 text-center text-slate-500"
+                      >
+                        لا توجد ملاحظات
+                      </TableCell>
                     </TableRow>
-                  ))
+                  ) : (
+                    notes.map((n) => (
+                      <TableRow key={n.id}>
+                        <TableCell>{n.note}</TableCell>
+                        <TableCell dir="ltr">
+                          {String(n.created_at).slice(0, 10)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )
+                ) : actions.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={4}
+                      className="py-10 text-center text-slate-500"
+                    >
+                      لا توجد إجراءات
+                    </TableCell>
+                  </TableRow>
                 ) : (
-                  actions.length === 0 ? (
-                    <TableRow><TableCell colSpan={4} className="py-10 text-center text-slate-500">لا توجد إجراءات</TableCell></TableRow>
-                  ) : actions.map((a) => (
+                  actions.map((a) => (
                     <TableRow key={a.id}>
-                      <TableCell className="font-medium">{a.action_type}</TableCell>
+                      <TableCell className="font-medium">
+                        {a.action_type}
+                      </TableCell>
                       <TableCell>{a.title}</TableCell>
                       <TableCell>{a.status ?? "—"}</TableCell>
-                      <TableCell dir="ltr">{a.created_at.slice(0,10)}</TableCell>
+                      <TableCell dir="ltr">
+                        {String(a.created_at).slice(0, 10)}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
